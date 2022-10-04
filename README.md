@@ -149,67 +149,7 @@ try (Connection conn = dataSource.getConnection();
 
 More examples can be found at [here](../../tree/master/examples/jdbc).
 
-## Build with Maven
+## Contributing
 
-Use `mvn -DskipITs clean verify` to compile and generate packages if you're using JDK 8. To create a multi-release jar (see [JEP-238](https://openjdk.java.net/jeps/238)), please use JDK 11+ with `~/.m2/toolchains.xml` like below, and run `mvn -Drelease -DskipITs clean verify` instead.
+Check out our [contributing guide](./CONTRIBUTING.md).
 
-```xml
-<?xml version="1.0" encoding="UTF8"?>
-<toolchains>
-    <toolchain>
-        <type>jdk</type>
-        <provides>
-            <version>11</version>
-        </provides>
-        <configuration>
-            <jdkHome>/usr/lib/jvm/java-11-openjdk</jdkHome>
-        </configuration>
-    </toolchain>
-    <toolchain>
-        <type>jdk</type>
-        <provides>
-            <version>17</version>
-        </provides>
-        <configuration>
-            <jdkHome>/usr/lib/jvm/java-17-openjdk</jdkHome>
-        </configuration>
-    </toolchain>
-</toolchains>
-```
-
-## Testing
-
-By default, [docker](https://docs.docker.com/engine/install/) is required to run integration test. Docker image(defaults to `clickhouse/clickhouse-server`) will be pulled from Internet, and containers will be created automatically by [testcontainers](https://www.testcontainers.org/) before testing. To test against specific version of ClickHouse, you can pass parameter like `-DclickhouseVersion=22.3` to Maven.
-
-In the case you don't want to use docker and/or prefer to test against an existing server, please follow instructions below:
-
-- make sure the server can be accessed using default account(user `default` and no password), which has both DDL and DML privileges
-- add below two configuration files to the existing server and expose all defaults ports for external access
-  - [ports.xml](../../blob/master/clickhouse-client/src/test/resources/containers/clickhouse-server/config.d/ports.xml) - enable all ports
-  - and [users.xml](../../blob/master/clickhouse-client/src/test/resources/containers/clickhouse-server/users.d/users.xml) - accounts used for integration test
-    Note: you may need to change root element from `clickhouse` to `yandex` when testing old version of ClickHouse.
-- make sure ClickHouse binary(usually `/usr/bin/clickhouse`) is available in PATH, as it's required to test `clickhouse-cli-client`
-- put `test.properties` under either `~/.clickhouse` or `src/test/resources` of your project, with content like below:
-  ```properties
-  clickhouseServer=x.x.x.x
-  # below properties are only useful for test containers
-  #clickhouseVersion=latest
-  #clickhouseTimezone=UTC
-  #clickhouseImage=clickhouse/clickhouse-server
-  #additionalPackages=
-  ```
-
-## Benchmark
-
-To benchmark JDBC drivers:
-
-```bash
-cd clickhouse-benchmark
-mvn -Drelease clean package
-# single thread mode
-java -DdbHost=localhost -jar target/benchmarks.jar -t 1 \
-    -p client=clickhouse-jdbc -p connection=reuse \
-    -p statement=prepared Query.selectInt8
-```
-
-It's time consuming to run all benchmarks against all drivers using different parameters for comparison. If you just need some numbers to understand performance, please refer to [this](https://github.com/ClickHouse/clickhouse-jdbc/issues/768)(still have plenty of room to improve according to ranking at [here](https://github.com/go-faster/ch-bench)).
