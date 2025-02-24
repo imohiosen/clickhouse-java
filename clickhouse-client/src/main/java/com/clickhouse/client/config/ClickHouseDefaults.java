@@ -17,6 +17,7 @@ import com.clickhouse.data.ClickHouseDataConfig;
  * {@code -Ddefault_async=false} on the Java command line, or setting
  * environment variable {@code DEFAULT_ASYNC=false}.
  */
+@Deprecated
 public enum ClickHouseDefaults implements ClickHouseOption {
     /**
      * Default execution mode.
@@ -49,7 +50,7 @@ public enum ClickHouseDefaults implements ClickHouseOption {
     /**
      * Default password.
      */
-    PASSWORD("password", "", "Password for authentication."),
+    PASSWORD("password", "", "Password for authentication.", true),
     /**
      * Default format.
      */
@@ -109,12 +110,18 @@ public enum ClickHouseDefaults implements ClickHouseOption {
     private final Serializable defaultValue;
     private final Class<? extends Serializable> clazz;
     private final String description;
+    private final boolean sensitive;
 
     <T extends Serializable> ClickHouseDefaults(String key, T defaultValue, String description) {
+        this(key, defaultValue, description, false);
+    }
+
+    <T extends Serializable> ClickHouseDefaults(String key, T defaultValue, String description, boolean sensitive) {
         this.key = ClickHouseChecker.nonNull(key, "key");
         this.defaultValue = ClickHouseChecker.nonNull(defaultValue, "defaultValue");
         this.clazz = defaultValue.getClass();
         this.description = ClickHouseChecker.nonNull(description, "description");
+        this.sensitive = sensitive;
     }
 
     @Override
@@ -140,5 +147,10 @@ public enum ClickHouseDefaults implements ClickHouseOption {
     @Override
     public Class<? extends Serializable> getValueType() {
         return clazz;
+    }
+
+    @Override
+    public boolean isSensitive() {
+        return sensitive;
     }
 }

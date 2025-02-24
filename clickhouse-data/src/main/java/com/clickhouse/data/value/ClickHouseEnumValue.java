@@ -9,6 +9,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code enum}.
  */
+@Deprecated
 public class ClickHouseEnumValue implements ClickHouseValue {
     /**
      * Create a new instance representing null value.
@@ -284,7 +285,14 @@ public class ClickHouseEnumValue implements ClickHouseValue {
 
     @Override
     public ClickHouseEnumValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, type.value(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else {
+            set(false, type.value(value));
+        }
+        return this;
     }
 
     @Override

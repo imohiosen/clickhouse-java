@@ -276,6 +276,24 @@ public class ClickHouseColumnTest {
         ClickHouseColumn c = ClickHouseColumn.of("a", "SimpleAggregateFunction(max, UInt64)");
         Assert.assertEquals(c.getDataType(), ClickHouseDataType.SimpleAggregateFunction);
         Assert.assertEquals(c.getNestedColumns().get(0).getDataType(), ClickHouseDataType.UInt64);
+
+        // https://github.com/ClickHouse/clickhouse-java/issues/1389
+        c = ClickHouseColumn.of("a", "SimpleAggregateFunction(anyLast, Nested(a String, b String))");
+        Assert.assertEquals(c.getDataType(), ClickHouseDataType.SimpleAggregateFunction);
+        Assert.assertEquals(c.getNestedColumns().get(0).getDataType(), ClickHouseDataType.Nested);
+        Assert.assertEquals(c.getNestedColumns().get(0).getNestedColumns(),
+                ClickHouseColumn.parse("a String, b String"));
+        Assert.assertEquals(
+                ClickHouseColumn.of("a", "SimpleAggregateFunction ( anyLast ,  Nested ( a String , b String ) )")
+                        .getParameters(),
+                c.getParameters());
+        Assert.assertEquals(
+                ClickHouseColumn.of("a",
+                        "SimpleAggregateFunction(anyLast,Nested(a String,b String,`c c` Nested(d Int32, e Tuple(UInt32, Nullable(String)))))")
+                        .getParameters(),
+                ClickHouseColumn.of("a",
+                        " SimpleAggregateFunction ( /** test **/anyLast -- test\n ,  Nested ( a String , b String,\n\t `c c` \t Nested(d Int32, e Tuple(UInt32, Nullable(String))) ) )")
+                        .getParameters());
     }
 
     @Test(groups = { "unit" })

@@ -7,9 +7,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.clickhouse.data.ClickHouseArraySequence;
 import com.clickhouse.data.ClickHouseChecker;
@@ -26,6 +26,7 @@ import com.clickhouse.data.value.ClickHouseIntegerValue;
 import com.clickhouse.data.value.ClickHouseLongValue;
 import com.clickhouse.data.value.ClickHouseShortValue;
 
+@Deprecated
 public interface BinaryDataProcessor {
     static class ArrayDeserializer extends ClickHouseDeserializer.CompositeDeserializer {
         private final long length;
@@ -139,11 +140,11 @@ public interface BinaryDataProcessor {
     }
 
     static class DateSerDe implements ClickHouseDeserializer, ClickHouseSerializer {
-        private static final Map<TimeZone, DateSerDe> cache = new HashMap<>();
+        private static final Map<TimeZone, DateSerDe> cache = new ConcurrentHashMap<>();
 
         public static final DateSerDe of(ClickHouseDataConfig config) {
             TimeZone tz = ClickHouseChecker.nonNull(config, ClickHouseDataConfig.TYPE_NAME).getTimeZoneForDate();
-            return cache.computeIfAbsent(tz, DateSerDe::new);
+            return cache.computeIfAbsent(tz == null ? ClickHouseValues.SYS_TIMEZONE : tz, DateSerDe::new);
         }
 
         protected final ZoneId zoneId;
@@ -174,11 +175,11 @@ public interface BinaryDataProcessor {
     }
 
     static class Date32SerDe implements ClickHouseDeserializer, ClickHouseSerializer {
-        private static final Map<TimeZone, Date32SerDe> cache = new HashMap<>();
+        private static final Map<TimeZone, Date32SerDe> cache = new ConcurrentHashMap<>();
 
         public static final Date32SerDe of(ClickHouseDataConfig config) {
             TimeZone tz = ClickHouseChecker.nonNull(config, ClickHouseDataConfig.TYPE_NAME).getTimeZoneForDate();
-            return cache.computeIfAbsent(tz, Date32SerDe::new);
+            return cache.computeIfAbsent(tz == null ? ClickHouseValues.SYS_TIMEZONE : tz, Date32SerDe::new);
         }
 
         protected final ZoneId zoneId;
@@ -210,7 +211,7 @@ public interface BinaryDataProcessor {
     }
 
     static class DateTime32SerDe implements ClickHouseDeserializer, ClickHouseSerializer {
-        private static final Map<TimeZone, DateTime32SerDe> cache = new HashMap<>();
+        private static final Map<TimeZone, DateTime32SerDe> cache = new ConcurrentHashMap<>();
 
         public static final DateTime32SerDe of(ClickHouseDataConfig config, ClickHouseColumn column) {
             TimeZone tz = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).hasTimeZone()
@@ -246,7 +247,7 @@ public interface BinaryDataProcessor {
         private static final int[] BASES = new int[] { 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000,
                 1000000000 };
         // use combined key for all timezones?
-        private static final Map<Integer, DateTime64SerDe> cache = new HashMap<>();
+        private static final Map<Integer, DateTime64SerDe> cache = new ConcurrentHashMap<>();
 
         public static final DateTime64SerDe of(ClickHouseDataConfig config, ClickHouseColumn column) {
             TimeZone tz = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).hasTimeZone()
@@ -289,17 +290,12 @@ public interface BinaryDataProcessor {
         @Override
         public void serialize(ClickHouseValue value, ClickHouseOutputStream output) throws IOException {
             LocalDateTime dt = value.asDateTime(scale);
-            long v = ClickHouseChecker.between(
-                    ClickHouseValues.UTC_ZONE.equals(zoneId) ? dt.toEpochSecond(ZoneOffset.UTC)
-                            : dt.atZone(zoneId).toEpochSecond(),
-                    ClickHouseValues.TYPE_DATE_TIME, BinaryStreamUtils.DATETIME64_MIN,
-                    BinaryStreamUtils.DATETIME64_MAX);
-            if (ClickHouseChecker.between(scale, ClickHouseValues.PARAM_SCALE, 0, 9) > 0) {
-                v *= BASES[scale];
-                int nanoSeconds = dt.getNano();
-                if (nanoSeconds > 0L) {
-                    v += nanoSeconds / BASES[9 - scale];
-                }
+            long v =  ClickHouseValues.UTC_ZONE.equals(zoneId) ? dt.toEpochSecond(ZoneOffset.UTC)
+                            : dt.atZone(zoneId).toEpochSecond();
+            v *= BASES[scale];
+            int nanoSeconds = dt.getNano();
+            if (nanoSeconds > 0L) {
+                v += nanoSeconds / BASES[9 - scale];
             }
 
             BinaryStreamUtils.writeInt64(output, v);
@@ -341,7 +337,7 @@ public interface BinaryDataProcessor {
     }
 
     static class Decimal32SerDe extends DecimalSerDe {
-        private static final Map<Integer, DecimalSerDe> cache = new HashMap<>();
+        private static final Map<Integer, DecimalSerDe> cache = new ConcurrentHashMap<>();
 
         public static final DecimalSerDe of(ClickHouseColumn column) {
             int scale = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).getScale();
@@ -369,7 +365,7 @@ public interface BinaryDataProcessor {
     }
 
     static class Decimal64SerDe extends DecimalSerDe {
-        private static final Map<Integer, DecimalSerDe> cache = new HashMap<>();
+        private static final Map<Integer, DecimalSerDe> cache = new ConcurrentHashMap<>();
 
         public static final DecimalSerDe of(ClickHouseColumn column) {
             int scale = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).getScale();
@@ -401,7 +397,7 @@ public interface BinaryDataProcessor {
     }
 
     static class Decimal128SerDe extends DecimalSerDe {
-        private static final Map<Integer, DecimalSerDe> cache = new HashMap<>();
+        private static final Map<Integer, DecimalSerDe> cache = new ConcurrentHashMap<>();
 
         public static final DecimalSerDe of(ClickHouseColumn column) {
             int scale = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).getScale();
@@ -433,7 +429,7 @@ public interface BinaryDataProcessor {
     }
 
     static class Decimal256SerDe extends DecimalSerDe {
-        private static final Map<Integer, DecimalSerDe> cache = new HashMap<>();
+        private static final Map<Integer, DecimalSerDe> cache = new ConcurrentHashMap<>();
 
         public static final DecimalSerDe of(ClickHouseColumn column) {
             int scale = ClickHouseChecker.nonNull(column, ClickHouseColumn.TYPE_NAME).getScale();

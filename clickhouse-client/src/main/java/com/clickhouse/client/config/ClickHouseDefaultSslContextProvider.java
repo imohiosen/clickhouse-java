@@ -1,9 +1,6 @@
 package com.clickhouse.client.config;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.security.KeyFactory;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
@@ -28,10 +25,12 @@ import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
+
 import com.clickhouse.client.ClickHouseConfig;
 import com.clickhouse.client.ClickHouseSslContextProvider;
 import com.clickhouse.data.ClickHouseUtils;
 
+@Deprecated
 public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContextProvider {
     static final String PEM_HEADER_PREFIX = "---BEGIN ";
     static final String PEM_HEADER_SUFFIX = " PRIVATE KEY---";
@@ -67,7 +66,7 @@ public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContext
         return startIndex < endIndex ? header.substring(startIndex, endIndex) : defaultAlg;
     }
 
-    static PrivateKey getPrivateKey(String keyFile)
+    public static PrivateKey getPrivateKey(String keyFile)
             throws NoSuchAlgorithmException, InvalidKeySpecException, IOException {
         String algorithm = (String) ClickHouseDefaults.SSL_KEY_ALGORITHM.getEffectiveDefaultValue();
         StringBuilder builder = new StringBuilder();
@@ -92,7 +91,7 @@ public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContext
         return kf.generatePrivate(keySpec);
     }
 
-    protected KeyStore getKeyStore(String cert, String key) throws NoSuchAlgorithmException, InvalidKeySpecException,
+    public KeyStore getKeyStore(String cert, String key) throws NoSuchAlgorithmException, InvalidKeySpecException,
             IOException, CertificateException, KeyStoreException {
         final KeyStore ks;
         try {
@@ -119,12 +118,29 @@ public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContext
         return ks;
     }
 
-    protected SSLContext getJavaSslContext(ClickHouseConfig config) throws SSLException {
+    public SSLContext getJavaSslContext(ClickHouseConfig config) throws SSLException {
         ClickHouseSslMode sslMode = config.getSslMode();
         String clientCert = config.getSslCert();
         String clientKey = config.getSslKey();
         String sslRootCert = config.getSslRootCert();
+        String truststorePath = config.getTrustStore();
+        String truststorePassword = config.getTrustStorePassword();
+        String keyStoreType = (!config.getKeyStoreType().isEmpty() && config.getKeyStoreType() != null) ? config.getKeyStoreType() : KeyStore.getDefaultType();
 
+        return getSslContextImpl(sslMode, clientCert, clientKey, sslRootCert, truststorePath, truststorePassword,
+                keyStoreType);
+    }
+
+    public SSLContext getSslContextFromCerts(String clientCert, String clientKey, String sslRootCert) throws SSLException {
+        return getSslContextImpl(ClickHouseSslMode.STRICT,
+                clientCert, clientKey, sslRootCert, null, null, KeyStore.getDefaultType());
+    }
+
+    public SSLContext getSslContextFromKeyStore(String truststorePath, String truststorePassword, String keyStoreType) throws SSLException {
+        return getSslContextImpl(ClickHouseSslMode.STRICT, null, null, null, truststorePath, truststorePassword, keyStoreType);
+    }
+
+    private SSLContext getSslContextImpl(ClickHouseSslMode sslMode, String clientCert, String clientKey, String sslRootCert, String truststorePath, String truststorePassword, String keyStoreType) throws SSLException {
         SSLContext ctx;
         try {
             ctx = SSLContext.getInstance((String) ClickHouseDefaults.SSL_PROTOCOL.getEffectiveDefaultValue());
@@ -133,23 +149,37 @@ public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContext
             SecureRandom sr = null;
 
             if (sslMode == ClickHouseSslMode.NONE) {
-                tms = new TrustManager[] { new NonValidatingTrustManager() };
+                tms = new TrustManager[]{new NonValidatingTrustManager()};
                 kms = new KeyManager[0];
                 sr = new SecureRandom();
             } else if (sslMode == ClickHouseSslMode.STRICT) {
-                if (clientCert != null && !clientCert.isEmpty()) {
-                    KeyManagerFactory factory = KeyManagerFactory
-                            .getInstance(KeyManagerFactory.getDefaultAlgorithm());
-                    factory.init(getKeyStore(clientCert, clientKey), null);
-                    kms = factory.getKeyManagers();
+                if (truststorePath != null && !truststorePath.isEmpty()) {
+
+                    try (InputStream in = ClickHouseUtils.getFileInputStream(truststorePath)) {
+                        KeyStore myTrustStore = KeyStore.getInstance(keyStoreType);
+                        myTrustStore.load(in, truststorePassword.toCharArray());
+                        TrustManagerFactory factory = TrustManagerFactory
+                                .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                        factory.init(myTrustStore);
+                        tms = factory.getTrustManagers();
+
+                    }
+                } else {
+                    if (clientCert != null && !clientCert.isEmpty()) {
+                        KeyManagerFactory factory = KeyManagerFactory
+                                .getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                        factory.init(getKeyStore(clientCert, clientKey), null);
+                        kms = factory.getKeyManagers();
+                    }
+
+                    if (sslRootCert != null && !sslRootCert.isEmpty()) {
+                        TrustManagerFactory factory = TrustManagerFactory
+                                .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                        factory.init(getKeyStore(sslRootCert, null));
+                        tms = factory.getTrustManagers();
+                    }
                 }
 
-                if (sslRootCert != null && !sslRootCert.isEmpty()) {
-                    TrustManagerFactory factory = TrustManagerFactory
-                            .getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                    factory.init(getKeyStore(sslRootCert, null));
-                    tms = factory.getTrustManagers();
-                }
                 sr = new SecureRandom();
             } else {
                 throw new IllegalArgumentException(ClickHouseUtils.format("unspported ssl mode '%s'", sslMode));
@@ -157,7 +187,7 @@ public class ClickHouseDefaultSslContextProvider implements ClickHouseSslContext
 
             ctx.init(kms, tms, sr);
         } catch (KeyManagementException | InvalidKeySpecException | NoSuchAlgorithmException | KeyStoreException
-                | CertificateException | IOException | UnrecoverableKeyException e) {
+                 | CertificateException | IOException | UnrecoverableKeyException e) {
             throw new SSLException("Failed to get SSL context", e);
         }
 

@@ -17,6 +17,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@link Instant}.
  */
+@Deprecated
 public class ClickHouseInstantValue extends ClickHouseObjectValue<Instant> {
     /**
      * Default instant.
@@ -371,6 +372,8 @@ public class ClickHouseInstantValue extends ClickHouseObjectValue<Instant> {
     public ClickHouseInstantValue update(String value) {
         if (value == null) {
             resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
         } else {
             set(LocalDateTime.parse(value, ClickHouseValues.DATETIME_FORMATTER).atZone(tz.toZoneId()).toInstant());
         }

@@ -27,6 +27,7 @@ import com.clickhouse.data.value.ClickHouseObjectValue;
 /**
  * Wrapper of {@code double[]}.
  */
+@Deprecated
 public class ClickHouseDoubleArrayValue extends ClickHouseObjectValue<double[]> implements ClickHouseArraySequence {
     private static final String TYPE_NAME = "double[]";
 
@@ -497,7 +498,7 @@ public class ClickHouseDoubleArrayValue extends ClickHouseObjectValue<double[]> 
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new double[length]);
         }
         return this;

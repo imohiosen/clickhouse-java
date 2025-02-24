@@ -77,7 +77,7 @@ To create a native binary of JDBC driver for evaluation and testing:
 
 ## Testing
 
-By default, [docker](https://docs.docker.com/engine/install/) is required to run integration test. Docker image(defaults to `clickhouse/clickhouse-server`) will be pulled from Internet, and containers will be created automatically by [testcontainers](https://www.testcontainers.org/) before testing. To test against specific version of ClickHouse, you can pass parameter like `-DclickhouseVersion=22.8` to Maven.
+By default, [docker](https://docs.docker.com/engine/install/) is required to run integration test. Docker image(defaults to `clickhouse/clickhouse-server`) will be pulled from Internet, and containers will be created automatically by [testcontainers](https://www.testcontainers.org/) before testing. To test against specific version of ClickHouse, you can pass parameter like `-DclickhouseVersion=23.3` to Maven.
 
 In the case you don't want to use docker and/or prefer to test against an existing server, please follow instructions below:
 
@@ -89,16 +89,21 @@ In the case you don't want to use docker and/or prefer to test against an existi
 - make sure ClickHouse binary(usually `/usr/bin/clickhouse`) is available in PATH, as it's required to test `clickhouse-cli-client`
 - put `test.properties` under either `~/.clickhouse` or `src/test/resources` of your project, with content like below:
   ```properties
+  # ClickHouse server for integration test
   clickhouseServer=x.x.x.x
+  # custom HTTP proxy for integration test
+  proxyAddress=<host>:<port>
+  
   # below properties are only useful for test containers
   #clickhouseVersion=latest
   #clickhouseTimezone=UTC
   #clickhouseImage=clickhouse/clickhouse-server
   #additionalPackages=
+  #proxyImage=ghcr.io/shopify/toxiproxy:2.5.0
   ```
 
 ### Tooling
-We use [TestNG](http://org.testng/doc) as testing framework and for running ClickHouse Local instance [testcontainers](https://www.testcontainers.org/modules/databases/clickhouse/).
+We use [TestNG](https://testng.org/) as testing framework and for running ClickHouse Local instance [testcontainers](https://www.testcontainers.org/modules/databases/clickhouse/).
 
 ### Running unit tests
 

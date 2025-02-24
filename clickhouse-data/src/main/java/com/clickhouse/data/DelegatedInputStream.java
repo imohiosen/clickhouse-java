@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Iterator;
 
+@Deprecated
 final class DelegatedInputStream extends ClickHouseInputStream {
     private final ClickHouseInputStream input;
 
@@ -58,6 +59,11 @@ final class DelegatedInputStream extends ClickHouseInputStream {
     @Override
     public byte readByte() throws IOException {
         return input.readByte();
+    }
+
+    @Override
+    public ClickHouseByteBuffer readBufferUntil(byte[] separator) throws IOException {
+        return input.readBufferUntil(separator);
     }
 
     @Override

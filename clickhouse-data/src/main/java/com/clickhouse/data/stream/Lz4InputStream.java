@@ -19,6 +19,7 @@ import net.jpountz.lz4.LZ4FastDecompressor;
 /**
  * Reader from clickhouse in lz4.
  */
+@Deprecated
 public class Lz4InputStream extends AbstractByteArrayInputStream {
     private static final LZ4Factory factory = LZ4Factory.fastestInstance();
 
@@ -48,6 +49,11 @@ public class Lz4InputStream extends AbstractByteArrayInputStream {
     }
 
     @Override
+    protected boolean reusableBuffer() {
+        return true;
+    }
+
+    @Override
     protected int updateBuffer() throws IOException {
         position = 0;
 
@@ -62,15 +68,15 @@ public class Lz4InputStream extends AbstractByteArrayInputStream {
         }
 
         // 4 bytes - size of the compressed data including 9 bytes of the header
-        int compressedSizeWithHeader = ClickHouseByteUtils.getInt32LE(header, 17);
+        int compressedSizeWithHeader = ClickHouseByteUtils.getInt32(header, 17);
         // 4 bytes - size of uncompressed data
-        int uncompressedSize = ClickHouseByteUtils.getInt32LE(header, 21);
+        int uncompressedSize = ClickHouseByteUtils.getInt32(header, 21);
         int offset = 9;
         final byte[] block = compressedBlock.length >= compressedSizeWithHeader ? compressedBlock
                 : (compressedBlock = new byte[compressedSizeWithHeader]);
         block[0] = header[16];
-        ClickHouseByteUtils.setInt32LE(block, 1, compressedSizeWithHeader);
-        ClickHouseByteUtils.setInt32LE(block, 5, uncompressedSize);
+        ClickHouseByteUtils.setInt32(block, 1, compressedSizeWithHeader);
+        ClickHouseByteUtils.setInt32(block, 5, uncompressedSize);
         // compressed data: compressed_size - 9 bytes
         if (!readFully(block, offset, compressedSizeWithHeader - offset)) {
             throw new StreamCorruptedException(
@@ -78,8 +84,8 @@ public class Lz4InputStream extends AbstractByteArrayInputStream {
         }
 
         long[] real = ClickHouseCityHash.cityHash128(block, 0, compressedSizeWithHeader);
-        if (real[0] != ClickHouseByteUtils.getInt64LE(header, 0)
-                || real[1] != ClickHouseByteUtils.getInt64LE(header, 8)) {
+        if (real[0] != ClickHouseByteUtils.getInt64(header, 0)
+                || real[1] != ClickHouseByteUtils.getInt64(header, 8)) {
             throw new InvalidObjectException("Checksum doesn't match: corrupted data.");
         }
 

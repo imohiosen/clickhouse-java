@@ -39,18 +39,6 @@
         </dependency>
         <dependency>
             <groupId>${project.parent.groupId}</groupId>
-            <artifactId>clickhouse-cli-client</artifactId>
-            <version>${revision}</version>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>${project.parent.groupId}</groupId>
-            <artifactId>clickhouse-grpc-client</artifactId>
-            <version>${revision}</version>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>${project.parent.groupId}</groupId>
             <artifactId>clickhouse-http-client</artifactId>
             <version>${revision}</version>
         </dependency>
@@ -182,6 +170,7 @@
                     <argLine>${surefireArgLine}</argLine>
                     <skipTests>${skipUTs}</skipTests>
                     <useModulePath>false</useModulePath>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
                 </configuration>
             </plugin>
             <plugin>
@@ -194,6 +183,7 @@
                     <skipITs>${skipITs}</skipITs>
                     <useSystemClassLoader>true</useSystemClassLoader>
                     <useModulePath>false</useModulePath>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
                 </configuration>
                 <executions>
                     <execution>
@@ -226,10 +216,6 @@
                                 <relocation>
                                     <pattern>com.google</pattern>
                                     <shadedPattern>${shade.base}.google</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>io.grpc</pattern>
-                                    <shadedPattern>${shade.base}.grpc</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>io.opencensus</pattern>
@@ -340,24 +326,6 @@
                                 </transformer>
                             </transformers>
                             <filters>
-                                <filter>
-                                    <artifact>${project.parent.groupId}:clickhouse-cli-client</artifact>
-                                    <excludes>
-                                        <exclude>**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>${project.parent.groupId}:clickhouse-grpc-client</artifact>
-                                    <excludes>
-                                        <exclude>**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>${project.parent.groupId}:io.grpc</artifact>
-                                    <excludes>
-                                        <exclude>**</exclude>
-                                    </excludes>
-                                </filter>
                                 <filter>
                                     <artifact>${project.parent.groupId}:org.roaringbitmap</artifact>
                                     <excludes>

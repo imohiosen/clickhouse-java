@@ -18,6 +18,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@link OffsetDateTime}.
  */
+@Deprecated
 public class ClickHouseOffsetDateTimeValue extends ClickHouseObjectValue<OffsetDateTime> {
     /**
      * Default value.
@@ -365,6 +366,8 @@ public class ClickHouseOffsetDateTimeValue extends ClickHouseObjectValue<OffsetD
     public ClickHouseOffsetDateTimeValue update(String value) {
         if (value == null) {
             resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
         } else {
             set(LocalDateTime.parse(value, ClickHouseValues.DATETIME_FORMATTER).atZone(tz.toZoneId())
                     .toOffsetDateTime());

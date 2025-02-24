@@ -8,14 +8,7 @@ import java.net.Inet6Address;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Enumeration;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.Map.Entry;
 import com.clickhouse.data.ClickHouseArraySequence;
 import com.clickhouse.data.ClickHouseChecker;
@@ -25,6 +18,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of Array.
  */
+@Deprecated
 public class ClickHouseArrayValue<T> extends ClickHouseObjectValue<T[]> implements ClickHouseArraySequence {
     /**
      * Creates an empty array.
@@ -485,7 +479,14 @@ public class ClickHouseArrayValue<T> extends ClickHouseObjectValue<T[]> implemen
     @Override
     @SuppressWarnings("unchecked")
     public ClickHouseArrayValue<T> update(String value) {
-        set((T[]) new String[] { value });
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty() || ClickHouseValues.EMPTY_ARRAY_EXPR.equals(value)) {
+            resetToDefault();
+        } else {
+            // TODO parse string
+            set((T[]) new String[] { value });
+        }
         return this;
     }
 
@@ -566,7 +567,7 @@ public class ClickHouseArrayValue<T> extends ClickHouseObjectValue<T[]> implemen
                         ? ClickHouseValues.createPrimitiveArray(clazz, 0, level)
                         : ClickHouseValues.createObjectArray(clazz, 0, level)));
             }
-        } else if (length() != length) {
+        } else {
             set((T[]) (clazz.isPrimitive()
                     ? ClickHouseValues.createPrimitiveArray(clazz, length, level)
                     : ClickHouseValues.createObjectArray(clazz, length, level)));
@@ -588,7 +589,31 @@ public class ClickHouseArrayValue<T> extends ClickHouseObjectValue<T[]> implemen
     @Override
     @SuppressWarnings("unchecked")
     public ClickHouseArraySequence setValue(int index, ClickHouseValue value) {
-        getValue()[index] = (T) value.asRawObject();
-        return this;
+        try {
+            getValue()[index] = (T) value.asRawObject();
+            return this;
+        } catch (ArrayStoreException arrayStoreException) {
+            Class<?> existingArrayType = value.asRawObject().getClass();
+            Class<?> idealArrayType = getValue().getClass();
+            // Loop to find the root component type
+            while (existingArrayType.isArray()) {
+                existingArrayType = existingArrayType.getComponentType();
+            }
+
+            int idealCount = 0;
+            while (idealArrayType.isArray()) {
+                idealArrayType = idealArrayType.getComponentType();
+                idealCount++;
+            }
+
+            // Create a new array of the correct type with the ideal depth
+            Object newArray = Array.newInstance(existingArrayType, 1);
+            for (int i = 1; i < idealCount - 1; i++) {
+                newArray = Array.newInstance(newArray.getClass(), 1);
+            }
+
+            getValue()[index] = (T) newArray;
+            return this;
+        }
     }
 }

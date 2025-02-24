@@ -22,6 +22,7 @@ import com.clickhouse.logging.LoggerFactory;
  * also contains session ID and references to the connected server and client
  * for issuing queries.
  */
+@Deprecated
 public final class ClickHouseTransaction implements Serializable {
     /**
      * This class encapsulates transaction ID, which is defined as
@@ -420,7 +421,7 @@ public final class ClickHouseTransaction implements Serializable {
         }
 
         id.updateAndGet(x -> {
-            try (ClickHouseResponse response = ClickHouseClient.newInstance(server.getProtocol()).connect(server)
+            try (ClickHouseResponse response = ClickHouseClient.newInstance(server.getProtocol()).read(server)
                     .query("KILL TRANSACTION WHERE tid=" + x.asTupleString()).executeAndWait()) {
                 // ignore
             } catch (ClickHouseException e) {

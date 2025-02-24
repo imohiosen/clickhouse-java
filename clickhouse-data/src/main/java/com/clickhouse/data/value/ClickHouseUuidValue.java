@@ -15,6 +15,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@link UUID}.
  */
+@Deprecated
 public class ClickHouseUuidValue extends ClickHouseObjectValue<UUID> {
     /**
      * Default value.
@@ -237,6 +238,8 @@ public class ClickHouseUuidValue extends ClickHouseObjectValue<UUID> {
     public ClickHouseUuidValue update(String value) {
         if (value == null) {
             resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
         } else {
             set(UUID.fromString(value));
         }

@@ -8,12 +8,15 @@ import java.sql.Statement;
 import java.util.Locale;
 import java.util.Properties;
 
+import com.clickhouse.client.ClickHouseServerForTest;
 import org.testng.Assert;
 
 import com.clickhouse.client.BaseIntegrationTest;
 import com.clickhouse.client.ClickHouseNode;
 import com.clickhouse.client.ClickHouseProtocol;
 import com.clickhouse.client.http.config.ClickHouseHttpOption;
+
+import javax.sql.DataSource;
 
 public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
     private static final String CLASS_PREFIX = "ClickHouse";
@@ -22,8 +25,6 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
     protected static final String CUSTOM_PROTOCOL_NAME = System.getProperty("protocol", "http").toUpperCase();
     protected static final ClickHouseProtocol DEFAULT_PROTOCOL = ClickHouseProtocol
             .valueOf(CUSTOM_PROTOCOL_NAME.indexOf("HTTP") >= 0 ? "HTTP" : CUSTOM_PROTOCOL_NAME);
-
-    protected final String dbName;
 
     protected String buildJdbcUrl(ClickHouseProtocol protocol, String prefix, String url) {
         if (url != null && url.startsWith("jdbc:")) {
@@ -70,18 +71,6 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
         }
     }
 
-    public JdbcIntegrationTest() {
-        String className = getClass().getSimpleName();
-        if (className.startsWith(CLASS_PREFIX)) {
-            className = className.substring(CLASS_PREFIX.length());
-        }
-        if (className.endsWith(CLASS_SUFFIX)) {
-            className = className.substring(0, className.length() - CLASS_SUFFIX.length());
-        }
-
-        this.dbName = "test_" + className.toLowerCase(Locale.ROOT);
-    }
-
     public String getServerAddress(ClickHouseProtocol protocol) {
         return getServerAddress(protocol, false);
     }
@@ -100,19 +89,33 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
                 .append(':').append(server.getPort()).toString();
     }
 
-    public ClickHouseDataSource newDataSource() throws SQLException {
+    public DataSource newDataSource() throws SQLException {
         return newDataSource(null, new Properties());
     }
 
-    public ClickHouseDataSource newDataSource(Properties properties) throws SQLException {
+    public DataSource newDataSource(Properties properties) throws SQLException {
         return newDataSource(null, properties);
     }
 
-    public ClickHouseDataSource newDataSource(String url) throws SQLException {
+    public DataSource newDataSource(String url) throws SQLException {
         return newDataSource(url, new Properties());
     }
 
-    public ClickHouseDataSource newDataSource(String url, Properties properties) throws SQLException {
+    public DataSource newDataSource(String url, Properties properties) throws SQLException {
+        if (properties == null) {
+            properties = new Properties();
+        }
+        if (!properties.containsKey("password")) {
+            properties.put("password", getPassword());
+        }
+        if (!properties.containsKey("user")) {
+            properties.put("user", "default");
+        }
+
+        if (isCloud()) {
+            url = String.format("jdbc:clickhouse:https://%s/%s", getServerAddress(ClickHouseProtocol.HTTP), ClickHouseServerForTest.getDatabase());
+            return new ClickHouseDataSource(buildJdbcUrl(DEFAULT_PROTOCOL, null, url), properties);
+        }
         return new ClickHouseDataSource(buildJdbcUrl(DEFAULT_PROTOCOL, null, url), properties);
     }
 
@@ -121,12 +124,12 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
     }
 
     public ClickHouseConnection newConnection(Properties properties) throws SQLException {
-        try (ClickHouseConnection conn = newDataSource(properties).getConnection();
-                ClickHouseStatement stmt = conn.createStatement();) {
-            stmt.execute("CREATE DATABASE IF NOT EXISTS " + dbName);
+        try (Connection conn = newDataSource(properties).getConnection();
+                Statement stmt = conn.createStatement();) {
+            stmt.execute("CREATE DATABASE IF NOT EXISTS " + ClickHouseServerForTest.getDatabase());
         }
 
-        return newDataSource(dbName, properties == null ? new Properties() : properties).getConnection();
+        return (ClickHouseConnection) newDataSource(ClickHouseServerForTest.getDatabase(), properties == null ? new Properties() : properties).getConnection();
     }
 
     public Connection newMySqlConnection(Properties properties) throws SQLException {
@@ -138,15 +141,15 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
             properties.setProperty("user", "default");
         }
         if (!properties.containsKey("password")) {
-            properties.setProperty("password", "");
+            properties.setProperty("password", getPassword());
         }
 
-        String url = buildJdbcUrl(ClickHouseProtocol.MYSQL, "jdbc:mysql://", dbName);
-        url += url.indexOf('?') > 0 ? "&useSSL=false" : "?useSSL=false";
+        String url = buildJdbcUrl(ClickHouseProtocol.MYSQL, "jdbc:mysql://", ClickHouseServerForTest.getDatabase());
+        url += url.indexOf('?') > 0 ? "&useSSL="+isCloud() : "?useSSL="+isCloud();
         Connection conn = DriverManager.getConnection(url, properties);
 
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute("CREATE DATABASE IF NOT EXISTS " + dbName);
+            stmt.execute("CREATE DATABASE IF NOT EXISTS " + ClickHouseServerForTest.getDatabase());
         }
 
         return conn;
@@ -158,9 +161,17 @@ public abstract class JdbcIntegrationTest extends BaseIntegrationTest {
         }
 
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute("DROP DATABASE IF EXISTS " + dbName);
+            stmt.execute("DROP DATABASE IF EXISTS " + ClickHouseServerForTest.getDatabase());
         } finally {
             conn.close();
         }
+    }
+
+
+    public String getEndpointString() {
+        return getEndpointString(false);
+    }
+    public String getEndpointString(boolean includeDbName) {
+        return (isCloud() ? "https" : "http") + "://" + getServerAddress(ClickHouseProtocol.HTTP) + "/" + (includeDbName ? ClickHouseServerForTest.getDatabase() : "");
     }
 }

@@ -1,23 +1,30 @@
 package com.clickhouse.client;
 
+import com.clickhouse.data.ClickHouseColumn;
+import com.clickhouse.data.ClickHouseInputStream;
+import com.clickhouse.data.ClickHouseRecord;
+import com.clickhouse.data.ClickHouseRecordMapper;
+import com.clickhouse.data.ClickHouseRecordTransformer;
+import com.clickhouse.data.ClickHouseSimpleRecord;
+import com.clickhouse.data.ClickHouseValue;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-
-import com.clickhouse.data.ClickHouseColumn;
-import com.clickhouse.data.ClickHouseInputStream;
-import com.clickhouse.data.ClickHouseRecord;
-import com.clickhouse.data.ClickHouseRecordTransformer;
-import com.clickhouse.data.ClickHouseValue;
-import com.clickhouse.data.format.ClickHouseSimpleRecord;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * A simple response built on top of two lists: columns and records.
  */
+@Deprecated
 public class ClickHouseSimpleResponse implements ClickHouseResponse {
     private static final long serialVersionUID = 6883452584393840649L;
 
+    private final TimeZone timeZone;
     /**
      * Creates a response object using columns definition and raw values.
      *
@@ -27,7 +34,7 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
      * @return response object
      */
     public static ClickHouseResponse of(ClickHouseConfig config, List<ClickHouseColumn> columns, Object[][] values) {
-        return of(config, columns, values, null);
+        return of(config, columns, values, null, null);
     }
 
     /**
@@ -40,7 +47,7 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
      * @return response object
      */
     public static ClickHouseResponse of(ClickHouseConfig config, List<ClickHouseColumn> columns, Object[][] values,
-            ClickHouseResponseSummary summary) {
+            ClickHouseResponseSummary summary, TimeZone timeZone) {
         if (columns == null) {
             columns = Collections.emptyList();
         }
@@ -68,7 +75,7 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
             }
         }
 
-        return new ClickHouseSimpleResponse(columns, wrappedValues, summary);
+        return new ClickHouseSimpleResponse(columns, wrappedValues, summary, timeZone);
     }
 
     /**
@@ -101,6 +108,9 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
         }
 
         List<ClickHouseColumn> columns = response.getColumns();
+        Map<String, Integer> columnIndex = IntStream.range(0, columns.size()).boxed().
+                collect(Collectors.toMap(i->columns.get(i).getColumnName() , i -> i));
+
         int size = columns.size();
         List<ClickHouseRecord> records = new LinkedList<>();
         int rowIndex = 0;
@@ -110,14 +120,14 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
                 values[i] = r.getValue(i).copy();
             }
 
-            ClickHouseRecord rec = ClickHouseSimpleRecord.of(columns, values);
+            ClickHouseRecord rec = ClickHouseSimpleRecord.of(columnIndex, values);
             if (func != null) {
                 func.update(rowIndex, rec);
             }
             records.add(rec);
         }
 
-        return new ClickHouseSimpleResponse(response.getColumns(), records, response.getSummary());
+        return new ClickHouseSimpleResponse(response.getColumns(), records, response.getSummary(), response.getTimeZone());
     }
 
     private final List<ClickHouseColumn> columns;
@@ -128,25 +138,28 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
     private volatile boolean closed;
 
     protected ClickHouseSimpleResponse(List<ClickHouseColumn> columns, List<ClickHouseRecord> records,
-            ClickHouseResponseSummary summary) {
+                                       ClickHouseResponseSummary summary, TimeZone timeZone) {
         this.columns = columns;
         this.records = Collections.unmodifiableList(records);
         this.summary = summary != null ? summary : ClickHouseResponseSummary.EMPTY;
+        this.timeZone = timeZone;
     }
 
     protected ClickHouseSimpleResponse(List<ClickHouseColumn> columns, ClickHouseValue[][] values,
-            ClickHouseResponseSummary summary) {
+            ClickHouseResponseSummary summary, TimeZone timeZone) {
         this.columns = columns;
-
+        Map<String, Integer> columnIndex = IntStream.range(0, columns.size()).boxed().
+                collect(Collectors.toMap(i->columns.get(i).getColumnName() , i -> i));
         int len = values.length;
         List<ClickHouseRecord> list = new ArrayList<>(len);
         for (int i = 0; i < len; i++) {
-            list.add(ClickHouseSimpleRecord.of(columns, values[i]));
+            list.add(ClickHouseSimpleRecord.of(columnIndex, values[i]));
         }
 
         this.records = Collections.unmodifiableList(list);
 
         this.summary = summary != null ? summary : ClickHouseResponseSummary.EMPTY;
+        this.timeZone = timeZone;
     }
 
     @Override
@@ -165,8 +178,23 @@ public class ClickHouseSimpleResponse implements ClickHouseResponse {
     }
 
     @Override
+    public TimeZone getTimeZone() {
+        return timeZone;
+    }
+
+    @Override
     public Iterable<ClickHouseRecord> records() {
         return records;
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public <T> Iterable<T> records(Class<T> objClass) {
+        if (objClass == null || objClass == ClickHouseRecord.class) {
+            return (Iterable<T>) records();
+        }
+
+        return () -> ClickHouseRecordMapper.wrap(null, columns, records().iterator(), objClass, null);
     }
 
     @Override

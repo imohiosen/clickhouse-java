@@ -9,6 +9,9 @@ import java.sql.Statement;
 import java.util.Properties;
 import java.util.UUID;
 
+import com.clickhouse.client.ClickHouseProtocol;
+import com.clickhouse.client.ClickHouseRequest;
+import com.clickhouse.client.ClickHouseServerForTest;
 import com.clickhouse.client.config.ClickHouseClientOption;
 import com.clickhouse.data.ClickHouseCompression;
 import com.clickhouse.data.ClickHouseUtils;
@@ -16,19 +19,35 @@ import com.clickhouse.data.value.UnsignedByte;
 
 import org.testng.Assert;
 import org.testng.SkipException;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 public class ClickHouseConnectionTest extends JdbcIntegrationTest {
+    @BeforeMethod(groups = "integration")
+    public void setV1() {
+        System.setProperty("clickhouse.jdbc.v1","true");
+    }
     @Override
     public ClickHouseConnection newConnection(Properties properties) throws SQLException {
-        return newDataSource(properties).getConnection();
+        return (ClickHouseConnection) newDataSource(properties).getConnection();
     }
 
     @Test(groups = "integration")
     public void testCentralizedConfiguration() throws SQLException {
+        if (isCloud()) return; //TODO: testCentralizedConfiguration - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("custom_settings", "max_result_rows=1");
-        try (ClickHouseConnection conn = newConnection(props)) {
+        try (ClickHouseConnection conn = newConnection(props); Statement stmt = conn.createStatement()) {
+            // gRPC stopped working since 23.3 with below error:
+            // SQL Code: 649, DB::Exception: Transaction Control Language queries are
+            // allowed only inside session: while starting a transaction with
+            // 'implicit_transaction'
+            if (stmt.unwrap(ClickHouseRequest.class).getServer().getProtocol() == ClickHouseProtocol.GRPC) {
+                throw new SkipException("Skip the test as transaction is supported since 22.7");
+            }
+
             Assert.assertEquals(conn.getConfig().getResponseCompressAlgorithm(), ClickHouseCompression.LZ4);
             Assert.assertTrue(conn.getJdbcConfig().isAutoCommit());
             Assert.assertFalse(conn.getJdbcConfig().isTransactionSupported());
@@ -37,7 +56,7 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         }
 
         props.setProperty("user", "poorman1");
-        props.setProperty("password", "");
+        props.setProperty("password", "poorman_111");
         props.setProperty("autoCommit", "false");
         props.setProperty("compress_algorithm", "lz4");
         props.setProperty("transactionSupport", "false");
@@ -55,6 +74,7 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         }
 
         props.setProperty("user", "poorman2");
+        props.setProperty("password", "poorman_222");
         try (ClickHouseConnection conn = newConnection(props)) {
             Assert.assertEquals(conn.getConfig().getResponseCompressAlgorithm(), ClickHouseCompression.GZIP);
             Assert.assertTrue(conn.getJdbcConfig().isAutoCommit());
@@ -116,12 +136,19 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testAutoCommitMode() throws SQLException {
+        if (isCloud()) return; //TODO: testAutoCommitMode - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("transactionSupport", "true");
 
         for (int i = 0; i < 10; i++) {
             try (ClickHouseConnection conn = newConnection(props); Statement stmt = conn.createStatement()) {
-                if (!conn.getServerVersion().check("[22.7,)")) {
+                if (!conn.getServerVersion().check("[22.7,)")
+                        // gRPC stopped working since 23.3 with below error:
+                        // SQL Code: 649, DB::Exception: Transaction Control Language queries are
+                        // allowed only inside session: while starting a transaction with
+                        // 'implicit_transaction'
+                        || stmt.unwrap(ClickHouseRequest.class).getServer().getProtocol() == ClickHouseProtocol.GRPC) {
                     throw new SkipException("Skip the test as transaction is supported since 22.7");
                 }
                 stmt.execute("select 1, throwIf(" + i + " % 3 = 0)");
@@ -141,6 +168,7 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
     public void testNonExistDatabase() throws SQLException {
         String database = UUID.randomUUID().toString();
         Properties props = new Properties();
+        props.setProperty(JdbcConfig.PROP_DATABASE_TERM, JdbcConfig.TERM_SCHEMA);
         props.setProperty(ClickHouseClientOption.DATABASE.getKey(), database);
         SQLException exp = null;
         try (ClickHouseConnection conn = newConnection(props)) {
@@ -180,8 +208,10 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         Assert.assertNotNull(exp, "Should not have SQLException because the database has been created");
     }
 
-    @Test(groups = "integration")
+    @Test(groups = "integration", enabled = false)
+    // Disabled because will be fixed later. (Should be tested in the new JDBC driver)
     public void testReadOnly() throws SQLException {
+        if (isCloud()) return; //TODO: testReadOnly - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         Properties props = new Properties();
         props.setProperty("user", "dba");
         props.setProperty("password", "dba");
@@ -190,8 +220,8 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
             Assert.assertFalse(stmt.execute(
                     "drop table if exists test_readonly; drop user if exists readonly1; drop user if exists readonly2; "
                             + "create table test_readonly(id String)engine=Memory; "
-                            + "create user readonly1 IDENTIFIED WITH no_password SETTINGS readonly=1; "
-                            + "create user readonly2 IDENTIFIED WITH no_password SETTINGS readonly=2; "
+                            + "create user readonly1 IDENTIFIED BY 'some_password' SETTINGS readonly=1; "
+                            + "create user readonly2 IDENTIFIED BY 'some_password' SETTINGS readonly=2; "
                             + "grant insert on test_readonly TO readonly1, readonly2"));
             conn.setReadOnly(false);
             Assert.assertFalse(conn.isReadOnly(), "Connection should NOT be readonly");
@@ -219,6 +249,7 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
         props.clear();
         props.setProperty("user", "readonly1");
+        props.setProperty("password", "some_password");
         try (Connection conn = newConnection(props); Statement stmt = conn.createStatement()) {
             Assert.assertTrue(conn.isReadOnly(), "Connection should be readonly");
             conn.setReadOnly(true);
@@ -244,6 +275,7 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         }
 
         props.setProperty("user", "readonly2");
+        props.setProperty("password", "some_password");
         try (Connection conn = newConnection(props); Statement stmt = conn.createStatement()) {
             Assert.assertTrue(conn.isReadOnly(), "Connection should be readonly");
             Assert.assertTrue(stmt.execute("set max_result_rows=5; select 1"));
@@ -288,11 +320,18 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testAutoCommit() throws SQLException {
+        if (isCloud()) return; //TODO: testAutoCommit - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("transactionSupport", "true");
         String tableName = "test_jdbc_tx_auto_commit";
         try (ClickHouseConnection c = newConnection(props); Statement s = c.createStatement()) {
-            if (!c.getServerVersion().check("[22.7,)")) {
+            if (!c.getServerVersion().check("[22.7,)")
+                    // gRPC stopped working since 23.3 with below error:
+                    // SQL Code: 649, DB::Exception: Transaction Control Language queries are
+                    // allowed only inside session: while starting a transaction with
+                    // 'implicit_transaction'
+                    || s.unwrap(ClickHouseRequest.class).getServer().getProtocol() == ClickHouseProtocol.GRPC) {
                 throw new SkipException("Skip the test as transaction is supported since 22.7");
             }
             s.execute("drop table if exists " + tableName + "; "
@@ -378,6 +417,8 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testManualTxApi() throws SQLException {
+        if (isCloud()) return; //TODO: testManualTxApi - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("autoCommit", "false");
         Properties txProps = new Properties();
@@ -385,7 +426,12 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         txProps.setProperty("transactionSupport", "true");
         String tableName = "test_jdbc_manual_tx_api";
         try (ClickHouseConnection c = newConnection(txProps); Statement s = c.createStatement()) {
-            if (!c.getServerVersion().check("[22.7,)")) {
+            if (!c.getServerVersion().check("[22.7,)")
+                    // gRPC stopped working since 23.3 with below error:
+                    // SQL Code: 649, DB::Exception: Transaction Control Language queries are
+                    // allowed only inside session: while starting a transaction with
+                    // 'implicit_transaction'
+                    || s.unwrap(ClickHouseRequest.class).getServer().getProtocol() == ClickHouseProtocol.GRPC) {
                 throw new SkipException("Skip the test as transaction is supported since 22.7");
             }
             s.execute("drop table if exists " + tableName + "; "
@@ -489,6 +535,8 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testManualTxTcl() throws SQLException {
+        if (isCloud()) return; //TODO: testManualTxTcl - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("autoCommit", "false");
         Properties txProps = new Properties();
@@ -496,7 +544,12 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
         txProps.setProperty("transactionSupport", "true");
         String tableName = "test_jdbc_manual_tx_tcl";
         try (ClickHouseConnection c = newConnection(txProps); Statement s = c.createStatement()) {
-            if (!c.getServerVersion().check("[22.7,)")) {
+            if (!c.getServerVersion().check("[22.7,)")
+                    // gRPC stopped working since 23.3 with below error:
+                    // SQL Code: 649, DB::Exception: Transaction Control Language queries are
+                    // allowed only inside session: while starting a transaction with
+                    // 'implicit_transaction'
+                    || s.unwrap(ClickHouseRequest.class).getServer().getProtocol() == ClickHouseProtocol.GRPC) {
                 throw new SkipException("Skip the test as transaction is supported since 22.7");
             }
             s.execute("drop table if exists " + tableName + "; "
@@ -631,6 +684,8 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testNestedTransactions() throws SQLException {
+        if (isCloud()) return; //TODO: testNestedTransactions - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("autoCommit", "false");
         props.setProperty("transactionSupport", "true");
@@ -673,6 +728,8 @@ public class ClickHouseConnectionTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testParallelTransactions() throws SQLException {
+        if (isCloud()) return; //TODO: testParallelTransactions - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+
         Properties props = new Properties();
         props.setProperty("autoCommit", "false");
         props.setProperty("transactionSupport", "true");

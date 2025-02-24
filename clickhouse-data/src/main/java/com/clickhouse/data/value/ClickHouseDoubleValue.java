@@ -10,6 +10,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code double}.
  */
+@Deprecated
 public class ClickHouseDoubleValue implements ClickHouseValue {
     /**
      * Create a new instance representing null value.
@@ -254,7 +255,20 @@ public class ClickHouseDoubleValue implements ClickHouseValue {
 
     @Override
     public ClickHouseDoubleValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, Double.parseDouble(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else if (value.equals("nan")) {
+            set(false, Double.NaN);
+        } else if (value.equals("+inf") || value.equals("inf")) {
+            set(false, Double.POSITIVE_INFINITY);
+        } else if (value.equals("-inf")) {
+            set(false, Double.NEGATIVE_INFINITY);
+        } else {
+            set(false, Double.parseDouble(value));
+        }
+        return this;
     }
 
     @Override

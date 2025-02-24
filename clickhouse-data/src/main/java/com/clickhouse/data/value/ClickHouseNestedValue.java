@@ -25,6 +25,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of Nested.
  */
+@Deprecated
 public class ClickHouseNestedValue extends ClickHouseObjectValue<Object[][]> {
     /**
      * Creates an empty nested value.
@@ -532,10 +533,14 @@ public class ClickHouseNestedValue extends ClickHouseObjectValue<Object[][]> {
     @Override
     public ClickHouseNestedValue update(String value) {
         if (value == null) {
-            return resetToNullOrEmpty();
+            resetToNullOrEmpty();
+        } else if (value.isEmpty() || ClickHouseValues.EMPTY_ARRAY_EXPR.equals(value)) {
+            resetToDefault();
+        } else {
+            // TODO parse string
+            set(new Object[][] { new String[] { value } });
         }
-        // TODO parse string
-        return set(new Object[][] { new String[] { value } });
+        return this;
     }
 
     @Override

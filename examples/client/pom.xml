@@ -27,32 +27,6 @@
         </license>
     </licenses>
 
-    <developers>
-        <developer>
-            <id>zhicwu</id>
-            <name>Zhichun Wu</name>
-            <email>zhicwu@gmail.com</email>
-            <timezone>+8</timezone>
-        </developer>
-    </developers>
-
-    <scm>
-        <url>https://github.com/ClickHouse/clickhouse-java</url>
-        <connection>scm:git@github.com:ClickHouse/clickhouse-java.git</connection>
-        <developerConnection>scm:git@github.com:ClickHouse/clickhouse-java.git</developerConnection>
-        <tag>HEAD</tag>
-    </scm>
-
-    <issueManagement>
-        <system>Github</system>
-        <url>https://github.com/ClickHouse/clickhouse-java/issues</url>
-    </issueManagement>
-
-    <ciManagement>
-        <system>Github</system>
-        <url>https://github.com/ClickHouse/clickhouse-java/actions</url>
-    </ciManagement>
-
     <repositories>
         <repository>
             <id>ossrh</id>
@@ -62,11 +36,15 @@
     </repositories>
 
     <properties>
-        <project.current.year>2023</project.current.year>
+        <project.current.year>2024</project.current.year>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-        <clickhouse-java.version>0.4.2</clickhouse-java.version>
+        <clickhouse-java.version>0.8.1-SNAPSHOT</clickhouse-java.version>
+        <!-- Nightly snapshot version from https://s01.oss.sonatype.org/content/repositories/snapshots/ or latest from local -->
+<!--        <clickhouse-java.version>0.8.1-SNAPSHOT</clickhouse-java.version>-->
+
+        <apache-httpclient.version>5.2.1</apache-httpclient.version>
 
         <compiler-plugin.version>3.8.1</compiler-plugin.version>
 
@@ -90,6 +68,27 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- Recommended to communicate with ClickHouse server over http -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>${apache-httpclient.version}</version>
+        </dependency>
+
+        <!-- Required for Protobuf example -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>4.27.5</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>4.27.1</version>
+        </dependency>
+
     </dependencies>
 
     <build>
@@ -108,6 +107,7 @@
                     </compilerArgs>
                 </configuration>
             </plugin>
+
         </plugins>
     </build>
 </project>

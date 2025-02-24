@@ -45,6 +45,7 @@ import com.clickhouse.logging.LoggerFactory;
  * This class depicts a ClickHouse server, essentially a combination of host,
  * port and protocol, for client to connect.
  */
+@Deprecated
 public class ClickHouseNode implements Function<ClickHouseNodeSelector, ClickHouseNode>, Serializable {
     /**
      * Node status.
@@ -787,7 +788,10 @@ public class ClickHouseNode implements Function<ClickHouseNodeSelector, ClickHou
         String scheme = normalizedUri.getScheme();
         ClickHouseProtocol protocol = ClickHouseProtocol.fromUriScheme(scheme);
         int port = extract(scheme, normalizedUri.getPort(), protocol, params);
-
+        if ((options == null || options.get(ClickHouseClientOption.SSL.getKey()) == null)
+                && scheme.equalsIgnoreCase("https")) {
+            params.put(ClickHouseClientOption.SSL.getKey(), "true");
+        }
         ClickHouseCredentials credentials = extract(normalizedUri.getRawUserInfo(), params, null);
 
         return new ClickHouseNode(normalizedUri.getHost(), protocol, port, credentials, params, tags);
@@ -1237,12 +1241,13 @@ public class ClickHouseNode implements Function<ClickHouseNodeSelector, ClickHou
                     .append(",r").append(replicaNum).append(')');
         }
 
+        Map<String, ClickHouseOption> m = ClickHouseConfig.ClientOptions.INSTANCE.sensitiveOptions;
         StringBuilder optsBuilder = new StringBuilder();
         for (Entry<String, String> option : options.entrySet()) {
             String key = option.getKey();
             if (!ClickHouseClientOption.DATABASE.getKey().equals(key)
                     && !ClickHouseClientOption.SSL.getKey().equals(key)) {
-                optsBuilder.append(key).append('=').append(option.getValue()).append(",");
+                optsBuilder.append(key).append('=').append(m.containsKey(key) ? "*" : option.getValue()).append(',');
             }
         }
         if (optsBuilder.length() > 0) {

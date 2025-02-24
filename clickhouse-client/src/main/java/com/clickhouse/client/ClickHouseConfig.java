@@ -16,6 +16,7 @@ import java.util.Map.Entry;
 
 import com.clickhouse.client.config.ClickHouseClientOption;
 import com.clickhouse.client.config.ClickHouseDefaults;
+import com.clickhouse.client.config.ClickHouseProxyType;
 import com.clickhouse.client.config.ClickHouseSslMode;
 import com.clickhouse.config.ClickHouseBufferingMode;
 import com.clickhouse.config.ClickHouseOption;
@@ -30,14 +31,22 @@ import com.clickhouse.data.ClickHouseVersion;
  * An immutable class holding client-specific options like
  * {@link ClickHouseCredentials} and {@link ClickHouseNodeSelector} etc.
  */
+@Deprecated
 public class ClickHouseConfig implements ClickHouseDataConfig {
     static final class ClientOptions {
-        private static final ClientOptions INSTANCE = new ClientOptions();
+        static final ClientOptions INSTANCE = new ClientOptions();
 
-        private final Map<String, ClickHouseOption> customOptions;
+        final Map<String, ClickHouseOption> customOptions;
+        final Map<String, ClickHouseOption> sensitiveOptions;
 
         private ClientOptions() {
             Map<String, ClickHouseOption> m = new LinkedHashMap<>();
+            Map<String, ClickHouseOption> s = new LinkedHashMap<>();
+            for (ClickHouseOption o : ClickHouseClientOption.class.getEnumConstants()) {
+                if (o.isSensitive()) {
+                    s.put(o.getKey(), o);
+                }
+            }
             try {
                 for (ClickHouseClient c : ClickHouseClientBuilder.loadClients()) {
                     Class<? extends ClickHouseOption> clazz = c.getOptionClass();
@@ -46,6 +55,9 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
                     }
                     for (ClickHouseOption o : clazz.getEnumConstants()) {
                         m.put(o.getKey(), o);
+                        if (o.isSensitive()) {
+                            s.put(o.getKey(), o);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -53,6 +65,7 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
             }
 
             customOptions = m.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(m);
+            sensitiveOptions = s.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(s);
         }
     }
 
@@ -173,7 +186,9 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
     // common options optimized for read
     private final boolean async;
     private final boolean autoDiscovery;
-    private final Map<String, String> customSettings; // serializable
+    private final Map<String, String> customSettings;
+    private final String customSocketFactory;
+    private final Map<String, String> customSocketFactoryOptions;
     private final String clientName;
     private final boolean compressRequest;
     private final ClickHouseCompression compressAlgorithm;
@@ -193,6 +208,7 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
     private final ClickHouseBufferingMode requestBuffering;
     private final ClickHouseBufferingMode responseBuffering;
     private final int maxExecutionTime;
+    private final int maxMapperCache;
     private final int maxQueuedBuffers;
     private final int maxQueuedRequests;
     private final long maxResultRows;
@@ -214,17 +230,24 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
     private final String sslRootCert;
     private final String sslCert;
     private final String sslKey;
+    private final String keyStoreType;
+    private final String trustStore;
+    private final String trustStorePassword;
     private final int transactionTimeout;
     private final boolean widenUnsignedTypes;
     private final boolean useBinaryString;
     private final boolean useBlockingQueue;
+    private final boolean useCompilation;
     private final boolean useObjectsInArray;
-    private final boolean useNoProxy;
     private final boolean useServerTimeZone;
     private final boolean useServerTimeZoneForDates;
     private final TimeZone timeZoneForDate;
     private final TimeZone useTimeZone;
-
+    private final ClickHouseProxyType proxyType;
+    private final String proxyHost;
+    private final int proxyPort;
+    private final String proxyUserName;
+    private final char[] proxyPassword;
     // client specific options
     private final Map<ClickHouseOption, Serializable> options;
     private final ClickHouseCredentials credentials;
@@ -279,6 +302,9 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
         this.async = (boolean) getOption(ClickHouseClientOption.ASYNC, ClickHouseDefaults.ASYNC);
         this.autoDiscovery = getBoolOption(ClickHouseClientOption.AUTO_DISCOVERY);
         this.customSettings = ClickHouseOption.toKeyValuePairs(getStrOption(ClickHouseClientOption.CUSTOM_SETTINGS));
+        this.customSocketFactory = getStrOption(ClickHouseClientOption.CUSTOM_SOCKET_FACTORY);
+        this.customSocketFactoryOptions = ClickHouseOption
+                .toKeyValuePairs(getStrOption(ClickHouseClientOption.CUSTOM_SOCKET_FACTORY_OPTIONS));
         this.clientName = getStrOption(ClickHouseClientOption.CLIENT_NAME);
         this.compressRequest = getBoolOption(ClickHouseClientOption.DECOMPRESS);
         this.compressAlgorithm = getOption(ClickHouseClientOption.DECOMPRESS_ALGORITHM, ClickHouseCompression.class);
@@ -289,18 +315,22 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
         this.connectionTimeout = getIntOption(ClickHouseClientOption.CONNECTION_TIMEOUT);
         this.database = (String) getOption(ClickHouseClientOption.DATABASE, ClickHouseDefaults.DATABASE);
         this.format = (ClickHouseFormat) getOption(ClickHouseClientOption.FORMAT, ClickHouseDefaults.FORMAT);
-        this.maxBufferSize = ClickHouseDataConfig.getBufferSize(getIntOption(ClickHouseClientOption.MAX_BUFFER_SIZE),
-                -1, -1);
-        this.bufferSize = getIntOption(ClickHouseClientOption.BUFFER_SIZE);
+        this.maxBufferSize = getIntOption(ClickHouseClientOption.MAX_BUFFER_SIZE);
+        int size = getIntOption(ClickHouseClientOption.BUFFER_SIZE);
+        this.bufferSize = Math.min(size < 1? DEFAULT_BUFFER_SIZE: size, this.maxBufferSize);
+        size = getIntOption(ClickHouseClientOption.READ_BUFFER_SIZE);
+        this.readBufferSize = Math.min(size < 1? this.bufferSize : size, this.maxBufferSize);
+        size = getIntOption(ClickHouseClientOption.WRITE_BUFFER_SIZE);
+        this.writeBufferSize = Math.min(size < 1 ? this.bufferSize : size , this.maxBufferSize);
         this.bufferQueueVariation = getIntOption(ClickHouseClientOption.BUFFER_QUEUE_VARIATION);
-        this.readBufferSize = getIntOption(ClickHouseClientOption.READ_BUFFER_SIZE);
-        this.writeBufferSize = getIntOption(ClickHouseClientOption.WRITE_BUFFER_SIZE);
-        this.requestChunkSize = getIntOption(ClickHouseClientOption.REQUEST_CHUNK_SIZE);
+        int chunkSize = getIntOption(ClickHouseClientOption.REQUEST_CHUNK_SIZE);
+        this.requestChunkSize = chunkSize < 1 ? this.writeBufferSize : chunkSize;
         this.requestBuffering = (ClickHouseBufferingMode) getOption(ClickHouseClientOption.REQUEST_BUFFERING,
                 ClickHouseDefaults.BUFFERING);
         this.responseBuffering = (ClickHouseBufferingMode) getOption(ClickHouseClientOption.RESPONSE_BUFFERING,
                 ClickHouseDefaults.BUFFERING);
         this.maxExecutionTime = getIntOption(ClickHouseClientOption.MAX_EXECUTION_TIME);
+        this.maxMapperCache = getIntOption(ClickHouseClientOption.MAX_MAPPER_CACHE);
         this.maxQueuedBuffers = getIntOption(ClickHouseClientOption.MAX_QUEUED_BUFFERS);
         this.maxQueuedRequests = getIntOption(ClickHouseClientOption.MAX_QUEUED_REQUESTS);
         this.maxResultRows = getLongOption(ClickHouseClientOption.MAX_RESULT_ROWS);
@@ -325,12 +355,15 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
         this.sslRootCert = getStrOption(ClickHouseClientOption.SSL_ROOT_CERTIFICATE);
         this.sslCert = getStrOption(ClickHouseClientOption.SSL_CERTIFICATE);
         this.sslKey = getStrOption(ClickHouseClientOption.SSL_KEY);
+        this.keyStoreType = getStrOption(ClickHouseClientOption.KEY_STORE_TYPE);
+        this.trustStore = getStrOption(ClickHouseClientOption.TRUST_STORE);
+        this.trustStorePassword = getStrOption(ClickHouseClientOption.KEY_STORE_PASSWORD);
         this.transactionTimeout = getIntOption(ClickHouseClientOption.TRANSACTION_TIMEOUT);
         this.widenUnsignedTypes = getBoolOption(ClickHouseClientOption.WIDEN_UNSIGNED_TYPES);
         this.useBinaryString = getBoolOption(ClickHouseClientOption.USE_BINARY_STRING);
         this.useBlockingQueue = getBoolOption(ClickHouseClientOption.USE_BLOCKING_QUEUE);
+        this.useCompilation = getBoolOption(ClickHouseClientOption.USE_COMPILATION);
         this.useObjectsInArray = getBoolOption(ClickHouseClientOption.USE_OBJECTS_IN_ARRAYS);
-        this.useNoProxy = getBoolOption(ClickHouseClientOption.USE_NO_PROXY);
         this.useServerTimeZone = getBoolOption(ClickHouseClientOption.USE_SERVER_TIME_ZONE);
         this.useServerTimeZoneForDates = getBoolOption(ClickHouseClientOption.USE_SERVER_TIME_ZONE_FOR_DATES);
 
@@ -348,6 +381,13 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
         }
         this.metricRegistry = Optional.ofNullable(metricRegistry);
         this.nodeSelector = nodeSelector == null ? ClickHouseNodeSelector.EMPTY : nodeSelector;
+
+        // select the type of proxy to use
+        this.proxyType = getOption(ClickHouseClientOption.PROXY_TYPE, ClickHouseProxyType.class);
+        this.proxyHost = getStrOption(ClickHouseClientOption.PROXY_HOST);
+        this.proxyPort = getIntOption(ClickHouseClientOption.PROXY_PORT);
+        this.proxyUserName = getStrOption(ClickHouseClientOption.PROXY_USERNAME);
+        this.proxyPassword = getStrOption(ClickHouseClientOption.PROXY_PASSWORD).toCharArray();
     }
 
     @Override
@@ -361,6 +401,14 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
 
     public Map<String, String> getCustomSettings() {
         return customSettings;
+    }
+
+    public String getCustomSocketFactory() {
+        return customSocketFactory;
+    }
+
+    public Map<String, String> getCustomSocketFactoryOptions() {
+        return customSocketFactoryOptions;
     }
 
     public String getClientName() {
@@ -448,6 +496,11 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
     }
 
     @Override
+    public int getMaxMapperCache() {
+        return maxMapperCache;
+    }
+
+    @Override
     public int getBufferSize() {
         return bufferSize;
     }
@@ -459,12 +512,12 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
 
     @Override
     public int getReadBufferSize() {
-        return ClickHouseDataConfig.getBufferSize(readBufferSize, getBufferSize(), getMaxBufferSize());
+        return readBufferSize;
     }
 
     @Override
     public int getWriteBufferSize() {
-        return ClickHouseDataConfig.getBufferSize(writeBufferSize, getBufferSize(), getMaxBufferSize());
+        return writeBufferSize;
     }
 
     /**
@@ -585,6 +638,18 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
         return sslKey;
     }
 
+    public String getKeyStoreType() {
+        return keyStoreType;
+    }
+
+    public String getTrustStore() {
+        return trustStore;
+    }
+
+    public String getTrustStorePassword() {
+        return trustStorePassword;
+    }
+
     public int getTransactionTimeout() {
         return transactionTimeout < 1 ? sessionTimeout : transactionTimeout;
     }
@@ -605,12 +670,33 @@ public class ClickHouseConfig implements ClickHouseDataConfig {
     }
 
     @Override
+    public boolean isUseCompilation() {
+        return useCompilation;
+    }
+
+    @Override
     public boolean isUseObjectsInArray() {
         return useObjectsInArray;
     }
 
-    public boolean isUseNoProxy() {
-        return useNoProxy;
+    public ClickHouseProxyType getProxyType() {
+        return proxyType;
+    }
+
+    public String getProxyHost() {
+        return proxyHost;
+    }
+
+    public int getProxyPort() {
+        return proxyPort;
+    }
+
+    public String getProxyUserName() {
+        return proxyUserName;
+    }
+
+    public char[] getProxyPassword() {
+        return proxyPassword;
     }
 
     public boolean isUseServerTimeZone() {

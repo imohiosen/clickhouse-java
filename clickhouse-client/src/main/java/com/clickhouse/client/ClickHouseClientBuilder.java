@@ -28,6 +28,7 @@ import com.clickhouse.logging.LoggerFactory;
  * {@link ClickHouseClient#builder()} for instantiation, and avoid
  * multi-threading as it's NOT thread-safe.
  */
+@Deprecated
 public class ClickHouseClientBuilder {
     /**
      * Dummy client which is only used by {@link Agent}.
@@ -441,7 +442,7 @@ public class ClickHouseClientBuilder {
                         lastError = e;
                     }
                 } catch (Throwable e) {
-                    log.warn("Skip %s due to: %s", c, e.getMessage());
+                    log.warn("Skip client due to exception: " + e.getMessage(), e);
                 }
             }
 

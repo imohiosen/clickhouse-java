@@ -17,6 +17,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@link BigDecimal}.
  */
+@Deprecated
 public class ClickHouseBigDecimalValue extends ClickHouseObjectValue<BigDecimal> {
     /**
      * Create a new instance representing null value.
@@ -279,6 +280,8 @@ public class ClickHouseBigDecimalValue extends ClickHouseObjectValue<BigDecimal>
     public ClickHouseBigDecimalValue update(String value) {
         if (value == null) {
             resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
         } else {
             set(new BigDecimal(value));
         }

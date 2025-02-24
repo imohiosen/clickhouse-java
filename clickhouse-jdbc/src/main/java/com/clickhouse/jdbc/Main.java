@@ -4,13 +4,15 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -24,6 +26,7 @@ import com.clickhouse.client.ClickHouseRequest;
 import com.clickhouse.client.ClickHouseResponse;
 import com.clickhouse.client.ClickHouseRequest.Mutation;
 import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.data.ClickHouseByteBuffer;
 import com.clickhouse.data.ClickHouseColumn;
 import com.clickhouse.data.ClickHouseDataProcessor;
 import com.clickhouse.data.ClickHouseDataStreamFactory;
@@ -41,10 +44,87 @@ import com.clickhouse.data.value.ClickHouseLongValue;
 import com.clickhouse.data.value.ClickHouseStringValue;
 import com.clickhouse.jdbc.internal.ClickHouseConnectionImpl;
 
+@Deprecated
 public final class Main {
+    public static class Pojo {
+        private byte b;
+        private long l;
+        private BigDecimal d;
+        private LocalDateTime t;
+        private long[] a;
+        private List<?> p;
+        private Object[][] n;
+        private Object j;
+
+        public void setByte(byte b) {
+            this.b = b;
+        }
+
+        public byte getByte() {
+            return b;
+        }
+
+        public void setLong(long l) {
+            this.l = l;
+        }
+
+        public long getLong() {
+            return l;
+        }
+
+        public void setDecimal(BigDecimal d) {
+            this.d = d;
+        }
+
+        public BigDecimal getDecimal() {
+            return d;
+        }
+
+        public void setDateTime(LocalDateTime t) {
+            this.t = t;
+        }
+
+        public LocalDateTime getDateTime() {
+            return t;
+        }
+
+        public void setArray(long[] a) {
+            this.a = a;
+        }
+
+        public long[] getArray() {
+            return a;
+        }
+
+        public void setTuple(List<?> p) {
+            this.p = p;
+        }
+
+        public List<?> getTuple() {
+            return p;
+        }
+
+        public void setNested(Object[][] n) {
+            this.n = n;
+        }
+
+        public Object[][] getNested() {
+            return n;
+        }
+
+        public void setJson(Object j) {
+            this.j = j;
+        }
+
+        public Object getJson() {
+            return j;
+        }
+    }
+
     static class Options {
         final String action;
         final int batch;
+        final boolean mapping;
         final boolean output;
         final int samples;
         final boolean serde;
@@ -60,6 +140,7 @@ public final class Main {
         private Options(String url, String query, String file) {
             action = System.getProperty("action", "read").toLowerCase();
             batch = Integer.getInteger("batch", 1000);
+            mapping = Boolean.getBoolean("mapping");
             output = Boolean.getBoolean("output");
             samples = Integer.getInteger("samples", 500000000);
             serde = !"false".equalsIgnoreCase(System.getProperty("serde", ""));
@@ -75,7 +156,11 @@ public final class Main {
                 this.query = query;
             }
             if (file == null || file.isEmpty()) {
-                this.file = requiresJdbc ? "jdbc.out" : "java.out";
+                if (output) {
+                    this.file = requiresJdbc ? "jdbc.out" : "java.out";
+                } else {
+                    this.file = "";
+                }
             } else {
                 this.file = file;
             }
@@ -86,23 +171,32 @@ public final class Main {
                 println("  - query=%s", this.query);
                 println("  -  file=%s", this.file);
                 println();
-                println("Options: action=%s, batch=%d, samples=%d, serde=%s, type=%s, verbose=%s", action, batch,
-                        samples, serde, type, verbose);
+                println("Options:\n  - action=%s, batch=%d, mapping=%s,\n  - output=%s, samples=%d, serde=%s, type=%s",
+                        action, batch, mapping, output, samples, serde, type);
             }
         }
 
         int getSamples() {
-            final int s;
-            if (isMixed() || isTuple() || isNested()) {
-                s = samples / 5;
-            } else if (isArray()) {
-                s = samples / 1000;
-            } else if (isJson()) {
-                s = samples / 500;
-            } else {
-                s = samples;
-            }
-            return s;
+            // final int s;
+            // if (isMixed() || isTuple() || isNested()) {
+            // s = samples / 5;
+            // } else if (isArray()) {
+            // s = samples / 1000;
+            // } else if (isJson()) {
+            // s = samples / 500;
+            // } else {
+            // s = samples;
+            // }
+            // return s;
+            return samples;
+        }
+
+        boolean hasFile() {
+            return !file.isEmpty();
+        }
+
+        boolean hasMapping() {
+            return mapping;
         }
 
         boolean isDumpAction() {
@@ -218,6 +312,11 @@ public final class Main {
         }
 
         ClickHouseSerializer getSerializer(ClickHouseConfig config) throws IOException {
+            final ClickHouseSerializer[] serializers = getSerializers(config);
+            return serializers.length == 1 ? serializers[0] : ClickHouseSerializer.of(Arrays.asList(serializers));
+        }
+
+        ClickHouseSerializer[] getSerializers(ClickHouseConfig config) throws IOException {
             final List<ClickHouseColumn> columns = getColumns();
             if (columns == null || columns.isEmpty()) {
                 throw new IllegalStateException("Not column information available for query: " + query);
@@ -225,32 +324,31 @@ public final class Main {
 
             final ClickHouseDataProcessor processor = ClickHouseDataStreamFactory.getInstance().getProcessor(config,
                     null, ClickHouseOutputStream.empty(), null, columns);
-            final ClickHouseSerializer[] serializers = processor.getSerializers(config, columns);
-            return serializers.length == 1 ? serializers[0] : ClickHouseSerializer.of(Arrays.asList(serializers));
+            return processor.getSerializers(config, columns);
         }
 
         String getSelectQuery() {
             final String selectQuery;
             if (isInt8()) {
-                selectQuery = "select number::Int8 v from numbers(%d)";
+                selectQuery = "select number::Int8 `byte` from numbers(%d)";
             } else if (isUInt64()) {
-                selectQuery = "select number v from numbers(%d)";
+                selectQuery = "select number `long` from numbers(%d)";
             } else if (isString()) {
-                selectQuery = "select toString(number) v from numbers(%d)";
+                selectQuery = "select toString(number) `string` from numbers(%d)";
             } else if (isDateTime()) {
-                selectQuery = "select toDateTime(number) v from numbers(%d)";
+                selectQuery = "select toDateTime(number) `datetime` from numbers(%d)";
             } else if (isDecimal()) {
-                selectQuery = "select toDecimal128(number, 6) v from numbers(%d)";
+                selectQuery = "select toDecimal128(number, 6) `decimal` from numbers(%d)";
             } else if (isMixed()) {
-                selectQuery = "select number::Int8 a, number b, toString(number) c, toDateTime(number) d, toDecimal128(number, 6) e from numbers(%d)";
+                selectQuery = "select number::Int8 `byte`, number `long`, toString(number) `string`, toDateTime(number) `datetime`, toDecimal128(number, 6) `decimal` from numbers(%d)";
             } else if (isArray()) {
-                selectQuery = "select range(100000, 101000 + number % 1000) v from numbers(%d)";
+                selectQuery = "select range(100000, 101000 + number %% 1000) as `array` from numbers(%d)";
             } else if (isTuple()) {
-                selectQuery = "select tuple(number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6)) v from numbers(%d)";
+                selectQuery = "select tuple(number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6)) `tuple` from numbers(%d)";
             } else if (isNested()) {
-                selectQuery = "select [(number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6))]::Nested(a Int8, b UInt64, c String, d DateTime, e Decimal128(6)) v from numbers(%d)";
+                selectQuery = "select [(number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6))]::Nested(a Int8, b UInt64, c String, d DateTime, e Decimal128(6)) `nested` from numbers(%d)";
             } else if (isJson()) {
-                selectQuery = "select (number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6), range(1000,1005), [tuple(number, number+1)])::Tuple(a Int8, b UInt64, c String, d DateTime, e Decimal128(6), f Array(UInt16), g Nested(x UInt64, y UInt64)) v from numbers(%d)";
+                selectQuery = "select (number::Int8, number, toString(number), toDateTime(number), toDecimal128(number, 6), range(1000,1005), [tuple(number, number+1)])::Tuple(a Int8, b UInt64, c String, d DateTime, e Decimal128(6), f Array(UInt16), g Nested(x UInt64, y UInt64)) `json` from numbers(%d)";
             } else {
                 selectQuery = "select %d";
             }
@@ -331,7 +429,7 @@ public final class Main {
                 try (ClickHouseConnection conn = new ClickHouseConnectionImpl(options.url)) {
                     ClickHouseRequest<?> request = conn.unwrap(ClickHouseRequest.class).query(options.query);
                     if (!request.getServer().getConfig().hasOption(ClickHouseClientOption.FORMAT)) {
-                        request.format(defaultFormat.defaultInputFormat());
+                        request.format(defaultFormat);
                     }
                     request.output(options.file);
                     try (ClickHouseResponse response = request.executeAndWait()) {
@@ -343,7 +441,7 @@ public final class Main {
                 try (ClickHouseClient client = ClickHouseClient.newInstance(server.getProtocol())) {
                     ClickHouseRequest<?> request = client.read(server).query(options.query);
                     if (!server.getConfig().hasOption(ClickHouseClientOption.FORMAT)) {
-                        request.format(defaultFormat.defaultInputFormat());
+                        request.format(defaultFormat);
                     }
                     request.output(options.file);
                     try (ClickHouseResponse response = request.query(options.query).executeAndWait()) {
@@ -389,14 +487,16 @@ public final class Main {
             final long rows;
             if (options.requiresJdbc) {
                 try (ClickHouseConnection conn = new ClickHouseConnectionImpl(options.url);
-                        Statement stmt = conn.createStatement()) {
-                    try (ResultSet rs = stmt.executeQuery(options.query)) {
+                        ClickHouseStatement stmt = conn.createStatement()) {
+                    if (options.hasFile()) {
                         try {
-                            rs.unwrap(ClickHouseResponse.class).getInputStream()
-                                    .setCopyToTarget(new FileOutputStream(options.file, false)); // NOSONAR
+                            stmt.setMirroredOutput(
+                                    !"-".equals(options.file) ? new FileOutputStream(options.file, false) : System.out); // NOSONAR
                         } catch (IOException e) {
                             throw SqlExceptionUtils.clientError(e);
                         }
+                    }
+                    try (ResultSet rs = stmt.executeQuery(options.query)) {
                         rows = read(rs);
                     }
                 }
@@ -408,12 +508,27 @@ public final class Main {
                         request.format(defaultFormat);
                     }
                     try (ClickHouseResponse response = request.executeAndWait()) {
-                        try {
-                            response.getInputStream().setCopyToTarget(new FileOutputStream(options.file, false)); // NOSONAR
-                        } catch (IOException e) {
-                            throw ClickHouseException.of(e, server);
+                        if (options.hasFile()) {
+                            try {
+                                response.getInputStream().setCopyToTarget(
+                                        !"-".equals(options.file) ? new FileOutputStream(options.file, false) // NOSONAR
+                                                : System.out); // NOSONAR
+                            } catch (IOException e) {
+                                throw ClickHouseException.of(e, server);
+                            }
                         }
-                        rows = read(response);
+
+                        if (options.hasMapping()) {
+                            long count = 0L;
+                            for (Pojo p : response.records(Pojo.class)) {
+                                if (p != null) {
+                                    count++;
+                                }
+                            }
+                            rows = count;
+                        } else {
+                            rows = read(response);
+                        }
                     }
                 }
             }
@@ -727,6 +842,138 @@ public final class Main {
         }
     }
 
+    static class MixedQuery extends GenericQuery {
+        MixedQuery(Options options) {
+            super(options);
+        }
+
+        @Override
+        long read(ResultSet rs) throws SQLException {
+            long count = 0L;
+            byte b = (byte) 0;
+            long l = 0L;
+            String s = null;
+            Object t = null;
+            BigDecimal d = null;
+            while (rs.next()) {
+                b = rs.getByte(1);
+                l = rs.getLong(2);
+                s = rs.getString(3);
+                t = rs.getObject(4);
+                d = rs.getBigDecimal(5);
+                count++;
+            }
+            return l > b && l > 0L && s != null && t != null && d != null ? count : 0L;
+        }
+
+        @Override
+        long read(ClickHouseResponse response) throws ClickHouseException {
+            long count = 0L;
+            byte b = (byte) 0;
+            long l = 0L;
+            String s = null;
+            Object t = null;
+            BigDecimal d = null;
+            if (options.serde) {
+                if (options.verbose) {
+                    println("Deserialization: records");
+                }
+                for (ClickHouseRecord r : response.records()) {
+                    b = r.getValue(0).asByte();
+                    l = r.getValue(1).asLong();
+                    s = r.getValue(2).asString();
+                    t = r.getValue(3).asDateTime();
+                    d = r.getValue(4).asBigDecimal();
+                    count++;
+                }
+                if (l > b && l > 0L && t != null && d != null) {
+                    // ignore
+                } else {
+                    s = null;
+                }
+            } else {
+                if (options.verbose) {
+                    println("Deserialization: read(Byte, Long, String, DateTime, Decimal)");
+                }
+                try (ClickHouseInputStream in = response.getInputStream()) {
+                    response.getColumns();
+                    for (long i = 0L, len = options.samples; i < len; i++) {
+                        b = in.readByte();
+                        l = in.readBuffer(8).asLong();
+                        s = in.readUnicodeString();
+                        t = in.readBuffer(4).asDateTime();
+                        d = in.readBuffer(16).asBigDecimal(6);
+                        count++;
+                    }
+                    if (l > b && l > 0L && t != null && d != null) {
+                        // ignore
+                    } else {
+                        s = null;
+                    }
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+            return s != null ? count : 0L;
+        }
+
+        @Override
+        long write(Connection conn) throws SQLException {
+            try (PreparedStatement stmt = conn.prepareStatement(options.query)) {
+                final int batchSize = options.batch;
+                long count = 0L;
+                long rows = 0L;
+                for (long i = 0, len = options.getSamples(); i < len; i++) {
+                    stmt.setByte(1, (byte) (i % 256));
+                    stmt.setLong(2, i);
+                    stmt.setString(3, Long.toString(i));
+                    stmt.setLong(4, i);
+                    stmt.setLong(5, i);
+                    stmt.addBatch();
+                    if ((count = (i + 1) % batchSize) == 0L) {
+                        rows += stmt.executeLargeBatch().length;
+                    }
+                }
+                if (count > 0L) {
+                    rows += stmt.executeLargeBatch().length;
+                }
+                return rows;
+            }
+        }
+
+        @Override
+        long write(Mutation request) throws ClickHouseException {
+            try (ClickHouseResponse response = request.data(o -> {
+                if (options.serde) {
+                    ClickHouseConfig config = request.getConfig();
+                    ClickHouseSerializer[] serializers = options.getSerializers(config);
+                    ClickHouseValue value = ClickHouseLongValue.ofNull();
+                    if (options.verbose) {
+                        println("Serialization: %s -> %s", serializers, value);
+                    }
+                    for (long i = 0L, len = options.samples, l = serializers.length; i < len; i++) {
+                        for (int j = 0; j < l; j++) {
+                            serializers[j].serialize(value.update(i), o);
+                        }
+                    }
+                } else {
+                    if (options.verbose) {
+                        println("Serialization: read(Byte, Long, String, DateTime, Decimal)");
+                    }
+                    for (long i = 0L, len = options.samples; i < len; i++) {
+                        o.writeByte((byte) (i % 256));
+                        BinaryStreamUtils.writeUnsignedInt64(o, i);
+                        o.writeUnicodeString(Long.toString(i));
+                        BinaryStreamUtils.writeUnsignedInt32(o, i);
+                        BinaryStreamUtils.writeInt128(o, BigInteger.valueOf(i));
+                    }
+                }
+            }).executeAndWait()) {
+                return response.getSummary().getWrittenRows();
+            }
+        }
+    }
+
     private static void println() {
         System.out.println(); // NOSONAR
     }
@@ -764,14 +1011,15 @@ public final class Main {
         println("Properties: -Dkey=value [-Dkey=value]*");
         println("  action \tAction, one of read(default), write, dump(no deserialization), and load(no serialization)");
         println("  batch  \tBatch size for JDBC writing, defaults to 1000");
-        println("  output \tWhether to write raw response into a file(java.out or jdbc.out), defaults to false");
+        println("  mapping\tWhether to map record into POJO, defaults to false");
+        println("  output \tWhether to write raw response into stdout or a file(java.out or jdbc.out), defaults to false");
         println("  samples\tSamples, defaults to 500000000");
         println("  serde  \tWhether to use default serialization/deserializion mechanism in Java client, defaults to true");
         println("  type   \tPredefined QUERY, one of Int8, UInt64, String, Array, Tuple, Nested, and Mixed");
         println("  verbose\tWhether to show logs, defaults to false");
         println();
         println("Examples:");
-        println("  -  %s 'https://localhost?sslmode=none' 'select 1'",
+        println("  -  %s 'https://localhost?sslmode=none' 'select 1' -",
                 index > 0 ? (execFile.substring(0, index) + " -Dverbose=true" + execFile.substring(index))
                         : (execFile + " -Dverbose=true"));
         println("  -  %s 'jdbc:ch://user:password@localhost:8123/default' 'select 1' output.file", execFile);
@@ -794,6 +1042,8 @@ public final class Main {
             query = new UInt64Query(options);
         } else if (options.isString()) {
             query = new StringQuery(options);
+        } else if (options.isMixed()) {
+            query = new MixedQuery(options);
         } else {
             query = new GenericQuery(options);
         }
@@ -802,7 +1052,7 @@ public final class Main {
         final long rows = query.run();
         if (options.verbose) {
             long elapsedNanos = System.nanoTime() - startTime;
-            println("Processed %,d rows in %,.2f ms (%,.2f rows/s)", rows, elapsedNanos / 1_000_000D,
+            println("\nProcessed %,d rows in %,.2f ms (%,.2f rows/s)", rows, elapsedNanos / 1_000_000D,
                     rows * 1_000_000_000D / elapsedNanos);
         }
         System.exit(rows > 0L ? 0 : 1);

@@ -15,6 +15,8 @@ import com.clickhouse.data.ClickHouseOutputStream;
 import com.clickhouse.data.ClickHousePipedOutputStream;
 import com.clickhouse.data.ClickHouseUtils;
 import com.clickhouse.data.ClickHouseWriter;
+import com.clickhouse.logging.Logger;
+import com.clickhouse.logging.LoggerFactory;
 
 /**
  * A combination of {@link java.io.PipedOutputStream} and
@@ -22,7 +24,11 @@ import com.clickhouse.data.ClickHouseWriter;
  * client. To avoid dead lock and high memory usage, please make sure writer and
  * reader are on two separate threads.
  */
+@Deprecated
 public class NonBlockingPipedOutputStream extends ClickHousePipedOutputStream {
+
+    private static final Logger log = LoggerFactory.getLogger(NonBlockingPipedOutputStream.class);
+
     protected final AdaptiveQueue<ByteBuffer> queue;
 
     protected final int bufferSize;
@@ -176,6 +182,7 @@ public class NonBlockingPipedOutputStream extends ClickHousePipedOutputStream {
         ByteBuffer b = buffer;
         while (length > 0) {
             int remain = b.remaining();
+            log.debug("writeBytes length:[%d] remain:[%d] offset: [%d]", length, remain, offset);
             if (length < remain) {
                 b.put(bytes, offset, length);
                 length = 0;

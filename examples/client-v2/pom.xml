@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.clickhouse</groupId>
+    <artifactId>java-client-examples</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>java-client-examples</name>
+    <description>Java Client Examples</description>
+    <url>https://github.com/ClickHouse/clickhouse-java</url>
+    <inceptionYear>2024</inceptionYear>
+
+    <organization>
+        <name>ClickHouse, Inc.</name>
+        <url>https://clickhouse.com/</url>
+    </organization>
+
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <scm>
+        <url>https://github.com/ClickHouse/clickhouse-java</url>
+        <connection>scm:git@github.com:ClickHouse/clickhouse-java.git</connection>
+        <developerConnection>scm:git@github.com:ClickHouse/clickhouse-java.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
+    <repositories>
+        <repository>
+            <id>central</id>
+            <name>Central Repository</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+
+<!-- For the night builds -->
+<!--        <repository>-->
+<!--            <id>ossrh</id>-->
+<!--            <name>Sonatype OSSRH</name>-->
+<!--            <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>-->
+<!--        </repository>-->
+    </repositories>
+
+    <properties>
+        <project.current.year>2025</project.current.year>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <clickhouse-java.version>0.8.1-SNAPSHOT</clickhouse-java.version>
+
+        <compiler-plugin.version>3.8.1</compiler-plugin.version>
+
+        <minJdk>1.8</minJdk>
+        <clickhouse-packages.classifier>all</clickhouse-packages.classifier>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>client-v2</artifactId>
+            <version>${clickhouse-java.version}</version>
+            <classifier>${clickhouse-packages.classifier}</classifier>
+        </dependency>
+
+        <!-- Recommended for JSON parsing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.17.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+            <version>2.17.2</version>
+        </dependency>
+
+        <!-- Popular Alternative to Jackson -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.11.0</version>
+        </dependency>
+
+        <!-- For parsing DB text formats -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+
+        <!-- Miscellaneous application dependencies -->
+
+        <!-- Project Lombok simplifies some routine tasks -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.32</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Basic logging -->
+        <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-api -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.13</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.17.2</version>
+            <scope>compile</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${compiler-plugin.version}</version>
+                <configuration>
+                    <source>${minJdk}</source>
+                    <target>${minJdk}</target>
+                    <showWarnings>true</showWarnings>
+                    <compilerArgs>
+                        <arg>-Xlint:all</arg>
+                        <!-- arg>-Werror</arg -->
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.32</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+</project>

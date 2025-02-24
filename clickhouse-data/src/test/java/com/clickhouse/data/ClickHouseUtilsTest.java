@@ -4,8 +4,10 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -59,6 +61,23 @@ public class ClickHouseUtilsTest {
     }
 
     @Test(groups = { "unit" })
+    public void testNewInstance() {
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.newInstance(null, null, null));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.newInstance("", Object.class, null));
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> ClickHouseUtils.newInstance("java.util.List", Object.class, null));
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> ClickHouseUtils.newInstance("java.util.NoSuchListClass", Object.class, null));
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> ClickHouseUtils.newInstance("java.lang.Object", ArrayList.class, null));
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> ClickHouseUtils.newInstance("java.util.ArrayList", Collections.class, null));
+
+        Assert.assertEquals(ClickHouseUtils.newInstance("java.util.ArrayList", List.class, null).getClass(),
+                ArrayList.class);
+    }
+
+    @Test(groups = { "unit" })
     public void testGetFile() throws IOException {
         Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.getFile(null));
         Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.getFile(""));
@@ -78,8 +97,20 @@ public class ClickHouseUtilsTest {
         Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles(null));
         Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles(""));
 
+        if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")) {
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM?.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM<?.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM>.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM|.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM*.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles("READM<>:\\\"|?*.md"));
+            Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.findFiles(" "));
+        }
+        else {
+            Assert.assertEquals(ClickHouseUtils.findFiles("READM?.md").size(), 1);
+        }
+
         Assert.assertEquals(ClickHouseUtils.findFiles("README.md").size(), 1);
-        Assert.assertEquals(ClickHouseUtils.findFiles("READM?.md").size(), 1);
         Assert.assertEquals(ClickHouseUtils.findFiles("glob:*.md").size(), 1);
         Assert.assertTrue(ClickHouseUtils.findFiles("glob:**.java", "src", "..").size() >= 1);
         Assert.assertTrue(ClickHouseUtils.findFiles("glob:**.java", "src/test").size() >= 1);
@@ -212,6 +243,19 @@ public class ClickHouseUtilsTest {
 
     @Test(groups = { "unit" })
     public void testSkipMultipleLineComment() {
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("", 0, 0));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("/", 0, 1));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("/*", 0, 2));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("/**", 0, 3));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("/*/*/", 0, 5));
+        Assert.assertThrows(IllegalArgumentException.class, () -> ClickHouseUtils.skipMultiLineComment("/*/**/", 0, 6));
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> ClickHouseUtils.skipMultiLineComment("/*/***/", 0, 7));
+
+        Assert.assertEquals(ClickHouseUtils.skipMultiLineComment("/**/", 1, 4), 4);
+        Assert.assertEquals(ClickHouseUtils.skipMultiLineComment("/*/**/*/", 2, 8), 8);
+        Assert.assertEquals(ClickHouseUtils.skipMultiLineComment("/*/*/**/*/*/", 2, 12), 12);
+
         String args = "select 1 /* select 1/*one*/ -- a */, 2";
         Assert.assertEquals(ClickHouseUtils.skipMultiLineComment(args, 11, args.length()),
                 args.lastIndexOf("*/") + 2);
@@ -467,9 +511,26 @@ public class ClickHouseUtilsTest {
         Assert.assertEquals(params, Arrays.asList("'a'", "1", "b"));
 
         params.clear();
-        args = " a, b c";
+        args = " a = 2 -- enum value\n, /** type declaration **/ b  c  , `d` /*e*/ --f";
         Assert.assertEquals(ClickHouseUtils.readParameters(args, 0, args.length(), params), args.length());
-        Assert.assertEquals(params, Arrays.asList("a", "bc"));
+        Assert.assertEquals(params, Arrays.asList("a=2", "b c", "`d`"));
+
+        params.clear();
+        args = "column1 SimpleAggregateFunction(anyLast, Nested(a string, b string))";
+        Assert.assertEquals(ClickHouseUtils.readParameters(args, args.indexOf('('), args.length(), params),
+                args.lastIndexOf(')') + 1);
+        Assert.assertEquals(params, Arrays.asList("anyLast", "Nested(a string,b string)"));
+    }
+
+    @Test(groups = { "unit" })
+    public void testRemove() {
+        Assert.assertEquals(ClickHouseUtils.remove(null, '\0'), "");
+        Assert.assertEquals(ClickHouseUtils.remove("", '\0'), "");
+        Assert.assertEquals(ClickHouseUtils.remove("test", '_'), "test");
+        Assert.assertEquals(ClickHouseUtils.remove("test", '_', 'x'), "test");
+        Assert.assertEquals(ClickHouseUtils.remove("test", '_', 't', 'e', 's', 'x'), "");
+        Assert.assertEquals(ClickHouseUtils.remove("test_1", '_'), "test1");
+        Assert.assertEquals(ClickHouseUtils.remove("\t te s t_1 \t", '_', '\t', ' '), "test1");
     }
 
     @Test(groups = { "unit" })

@@ -28,6 +28,7 @@ import com.clickhouse.data.value.UnsignedLong;
 /**
  * Wrapper of {@code long[]}.
  */
+@Deprecated
 public class ClickHouseLongArrayValue extends ClickHouseObjectValue<long[]> implements ClickHouseArraySequence {
     static final class UnsignedLongArrayValue extends ClickHouseLongArrayValue {
         @Override
@@ -595,7 +596,7 @@ public class ClickHouseLongArrayValue extends ClickHouseObjectValue<long[]> impl
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new long[length]);
         }
         return this;

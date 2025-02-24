@@ -18,6 +18,7 @@ import com.clickhouse.data.ClickHouseChecker;
 import com.clickhouse.data.ClickHouseValue;
 import com.clickhouse.data.ClickHouseValues;
 
+@Deprecated
 public class ClickHouseMapValue extends ClickHouseObjectValue<Map<?, ?>> {
     private static final String DEFAULT_STRING_KEY = "1";
     private static final String DEFAULT_UUID_KEY = "00000000-0000-0000-0000-000000000000";
@@ -140,7 +141,7 @@ public class ClickHouseMapValue extends ClickHouseObjectValue<Map<?, ?>> {
     public String asString() {
         Map<?, ?> value = getValue();
         if (value == null || value.isEmpty()) {
-            return "{}";
+            return ClickHouseValues.EMPTY_MAP_EXPR;
         }
         StringBuilder builder = new StringBuilder().append('{');
         for (Entry<?, ?> e : value.entrySet()) {
@@ -171,7 +172,7 @@ public class ClickHouseMapValue extends ClickHouseObjectValue<Map<?, ?>> {
     public String toSqlExpression() {
         Map<?, ?> value = getValue();
         if (value == null || value.isEmpty()) {
-            return "{}";
+            return ClickHouseValues.EMPTY_MAP_EXPR;
         }
 
         StringBuilder builder = new StringBuilder().append('{');
@@ -248,10 +249,15 @@ public class ClickHouseMapValue extends ClickHouseObjectValue<Map<?, ?>> {
     @Override
     public ClickHouseMapValue update(String value) {
         if (value == null) {
-            return resetToNullOrEmpty();
+            resetToNullOrEmpty();
+        } else if (value.isEmpty() || ClickHouseValues.EMPTY_MAP_EXPR.equals(value)) {
+            resetToDefault();
+        } else {
+            // TODO parse string
+            set(Collections.singletonMap(getDefaultKey(), valueType.cast(value)));
         }
 
-        return set(Collections.singletonMap(getDefaultKey(), valueType.cast(value)));
+        return this;
     }
 
     @Override

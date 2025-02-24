@@ -1,12 +1,13 @@
 package com.clickhouse.data;
 
+import com.clickhouse.config.ClickHouseBufferingMode;
+import com.clickhouse.config.ClickHouseRenameMethod;
+
 import java.io.Serializable;
 import java.math.RoundingMode;
 import java.util.TimeZone;
 
-import com.clickhouse.config.ClickHouseBufferingMode;
-import com.clickhouse.config.ClickHouseRenameMethod;
-
+@Deprecated
 public interface ClickHouseDataConfig extends Serializable {
     static class Wrapped implements ClickHouseDataConfig {
         private static final long serialVersionUID = -8358244156373920188L;
@@ -78,6 +79,11 @@ public interface ClickHouseDataConfig extends Serializable {
         }
 
         @Override
+        public int getMaxMapperCache() {
+            return config.getMaxMapperCache();
+        }
+
+        @Override
         public int getMaxQueuedBuffers() {
             return config.getMaxQueuedBuffers();
         }
@@ -108,6 +114,11 @@ public interface ClickHouseDataConfig extends Serializable {
         }
 
         @Override
+        public boolean isUseCompilation() {
+            return config.isUseCompilation();
+        }
+
+        @Override
         public boolean isUseObjectsInArray() {
             return config.isUseObjectsInArray();
         }
@@ -124,10 +135,11 @@ public interface ClickHouseDataConfig extends Serializable {
 
     static final ClickHouseBufferingMode DEFAULT_BUFFERING_MODE = ClickHouseBufferingMode.RESOURCE_EFFICIENT;
 
-    static final int DEFAULT_BUFFER_SIZE = 4096;
+    static final int DEFAULT_BUFFER_SIZE = 8192;
     static final int DEFAULT_READ_BUFFER_SIZE = DEFAULT_BUFFER_SIZE;
     static final int DEFAULT_WRITE_BUFFER_SIZE = DEFAULT_BUFFER_SIZE;
-    static final int DEFAULT_MAX_BUFFER_SIZE = 128 * 1024;
+    static final int DEFAULT_MAX_BUFFER_SIZE = 128 * DEFAULT_BUFFER_SIZE;
+    static final int DEFAULT_MAX_MAPPER_CACHE = 100;
     static final int DEFAULT_MAX_QUEUED_BUFFERS = 512;
     static final int DEFAULT_BUFFER_QUEUE_VARIATION = 100;
 
@@ -138,6 +150,7 @@ public interface ClickHouseDataConfig extends Serializable {
     static final boolean DEFAULT_REUSE_VALUE_WRAPPER = true;
     static final boolean DEFAULT_USE_BINARY_STRING = false;
     static final boolean DEFAULT_USE_BLOCKING_QUEUE = false;
+    static final boolean DEFAULT_USE_COMPILATION = false;
     static final boolean DEFAULT_USE_OBJECT_IN_ARRAY = false;
     static final boolean DEFAULT_WIDEN_UNSIGNED_TYPE = false;
 
@@ -256,6 +269,15 @@ public interface ClickHouseDataConfig extends Serializable {
     }
 
     /**
+     * Gets maximum number of mappers can be cached.
+     *
+     * @return maximum number of mappers can be cached
+     */
+    default int getMaxMapperCache() {
+        return DEFAULT_MAX_MAPPER_CACHE;
+    }
+
+    /**
      * Gets maximum number of buffers can be queued for processing.
      *
      * @return maximum number of buffers can be queued
@@ -326,6 +348,15 @@ public interface ClickHouseDataConfig extends Serializable {
      */
     default boolean isUseBlockingQueue() {
         return DEFAULT_USE_BLOCKING_QUEUE;
+    }
+
+    /**
+     * Checks whether compilation is used in object mapping and serialization.
+     *
+     * @return true if compilation is used; false otherwise
+     */
+    default boolean isUseCompilation() {
+        return DEFAULT_USE_COMPILATION;
     }
 
     /**

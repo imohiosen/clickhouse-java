@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.clickhouse.data.ClickHouseByteBuffer;
+import com.clickhouse.data.ClickHouseByteUtils;
 import com.clickhouse.data.ClickHouseChecker;
 import com.clickhouse.data.ClickHouseDataType;
 import com.clickhouse.data.ClickHouseInputStream;
@@ -34,6 +35,8 @@ import com.clickhouse.data.value.ClickHouseBitmap;
 /**
  * Utility class for dealing with binary stream and data.
  */
+
+@Deprecated
 public final class BinaryStreamUtils {
     public static final int U_INT8_MAX = (1 << 8) - 1;
     public static final int U_INT16_MAX = (1 << 16) - 1;
@@ -51,8 +54,8 @@ public final class BinaryStreamUtils {
                     (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
                     (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
 
-    public static final int DATE32_MAX = (int) LocalDate.of(2283, 11, 11).toEpochDay();
-    public static final int DATE32_MIN = (int) LocalDate.of(1925, 1, 1).toEpochDay();
+    public static final int DATE32_MAX = (int) LocalDate.of(2299, 12, 31).toEpochDay();
+    public static final int DATE32_MIN = (int) LocalDate.of(1900, 1, 1).toEpochDay();
 
     public static final BigDecimal DECIMAL32_MAX = new BigDecimal("1000000000");
     public static final BigDecimal DECIMAL32_MIN = new BigDecimal("-1000000000");
@@ -68,9 +71,11 @@ public final class BinaryStreamUtils {
     public static final BigDecimal DECIMAL256_MIN = new BigDecimal(
             "-10000000000000000000000000000000000000000000000000000000000000000000000000000");
 
-    public static final long DATETIME64_MAX = LocalDateTime.of(LocalDate.of(2283, 11, 11), LocalTime.MAX)
+    public static final long DATETIME64_MAX = LocalDateTime.of(LocalDate.of(2299, 12, 31), LocalTime.MAX)
             .toEpochSecond(ZoneOffset.UTC);
-    public static final long DATETIME64_MIN = LocalDateTime.of(LocalDate.of(1925, 1, 1), LocalTime.MIN)
+    public static final long DATETIME64_9_MAX = LocalDateTime.of(2262, 4, 11, 23, 47, 16, 0)
+            .toEpochSecond(ZoneOffset.UTC);
+    public static final long DATETIME64_MIN = LocalDateTime.of(LocalDate.of(1900, 1, 1), LocalTime.MIN)
             .toEpochSecond(ZoneOffset.UTC);
 
     public static final long MILLIS_IN_DAY = TimeUnit.DAYS.toMillis(1);
@@ -98,8 +103,7 @@ public final class BinaryStreamUtils {
     }
 
     public static int toInt32(byte[] bytes, int offset) {
-        return (0xFF & bytes[offset++]) | ((0xFF & bytes[offset++]) << 8) | ((0xFF & bytes[offset++]) << 16)
-                | ((0xFF & bytes[offset]) << 24);
+        return ClickHouseByteUtils.getInt32(bytes, offset);
     }
 
     public static long toInt64(ClickHouseByteBuffer byteBuffer) {
@@ -107,28 +111,15 @@ public final class BinaryStreamUtils {
     }
 
     public static long toInt64(byte[] bytes, int offset) {
-        return (0xFFL & bytes[offset++]) | ((0xFFL & bytes[offset++]) << 8) | ((0xFFL & bytes[offset++]) << 16)
-                | ((0xFFL & bytes[offset++]) << 24) | ((0xFFL & bytes[offset++]) << 32)
-                | ((0xFFL & bytes[offset++]) << 40) | ((0xFFL & bytes[offset++]) << 48)
-                | ((0xFFL & bytes[offset]) << 56);
+        return ClickHouseByteUtils.getInt64(bytes, offset);
     }
 
     public static void setInt32(byte[] bytes, int offset, int value) {
-        bytes[offset++] = (byte) (0xFF & value);
-        bytes[offset++] = (byte) (0xFF & (value >> 8));
-        bytes[offset++] = (byte) (0xFF & (value >> 16));
-        bytes[offset] = (byte) (0xFF & (value >> 24));
+        ClickHouseByteUtils.setInt32(bytes, offset, value);
     }
 
     public static void setInt64(byte[] bytes, int offset, long value) {
-        bytes[offset++] = (byte) (0xFF & value);
-        bytes[offset++] = (byte) (0xFF & (value >> 8));
-        bytes[offset++] = (byte) (0xFF & (value >> 16));
-        bytes[offset++] = (byte) (0xFF & (value >> 24));
-        bytes[offset++] = (byte) (0xFF & (value >> 32));
-        bytes[offset++] = (byte) (0xFF & (value >> 40));
-        bytes[offset++] = (byte) (0xFF & (value >> 48));
-        bytes[offset] = (byte) (0xFF & (value >> 56));
+        ClickHouseByteUtils.setInt64(bytes, offset, value);
     }
 
     /**
@@ -1542,7 +1533,9 @@ public final class BinaryStreamUtils {
         long v = ClickHouseChecker.between(
                 tz == null || tz.equals(ClickHouseValues.UTC_TIMEZONE) ? value.toEpochSecond(ZoneOffset.UTC)
                         : value.atZone(tz.toZoneId()).toEpochSecond(),
-                ClickHouseValues.TYPE_DATE_TIME, DATETIME64_MIN, DATETIME64_MAX);
+                ClickHouseValues.TYPE_DATE_TIME,
+                DATETIME64_MIN,
+                scale == 9 ? DATETIME64_9_MAX : DATETIME64_MAX);
         if (ClickHouseChecker.between(scale, ClickHouseValues.PARAM_SCALE, 0, 9) > 0) {
             v *= BASES[scale];
             int nanoSeconds = value.getNano();

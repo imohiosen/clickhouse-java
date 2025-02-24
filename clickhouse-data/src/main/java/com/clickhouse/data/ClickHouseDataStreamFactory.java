@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import com.clickhouse.config.ClickHouseBufferingMode;
+import com.clickhouse.data.format.ClickHouseBinaryFormatProcessor;
 import com.clickhouse.data.format.ClickHouseRowBinaryProcessor;
 import com.clickhouse.data.format.ClickHouseTabSeparatedProcessor;
 import com.clickhouse.data.stream.BlockingPipedOutputStream;
@@ -23,6 +24,7 @@ import com.clickhouse.data.stream.NonBlockingPipedOutputStream;
 /**
  * Factory class for creating objects to handle data stream.
  */
+@Deprecated
 public class ClickHouseDataStreamFactory {
     protected static final class DefaultExecutors {
         protected static final ExecutorService executor;
@@ -136,8 +138,14 @@ public class ClickHouseDataStreamFactory {
             throws IOException {
         ClickHouseFormat format = ClickHouseChecker.nonNull(config, ClickHouseDataConfig.TYPE_NAME).getFormat();
         ClickHouseDataProcessor processor = null;
-        if (ClickHouseFormat.RowBinary == format || ClickHouseFormat.RowBinaryWithNamesAndTypes == format) {
+        if (ClickHouseFormat.RowBinary == format ||
+                ClickHouseFormat.RowBinaryWithNamesAndTypes == format ||
+                ClickHouseFormat.RowBinaryWithDefaults == format ||
+                ClickHouseFormat.RowBinaryWithNames == format) {
             processor = new ClickHouseRowBinaryProcessor(config, input, output, columns, settings);
+        } else if (format.isBinary()) {
+            // to let outer code access input stream
+            processor = new ClickHouseBinaryFormatProcessor(config, input, output, columns, settings);
         } else if (format.isText()) {
             processor = new ClickHouseTabSeparatedProcessor(config, input, output, columns, settings);
         }

@@ -3,9 +3,13 @@ package com.clickhouse.client;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
+import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.config.ClickHouseOption;
 import com.clickhouse.data.ClickHouseColumn;
 import com.clickhouse.data.ClickHouseDataProcessor;
 import com.clickhouse.data.ClickHouseDataStreamFactory;
@@ -18,63 +22,64 @@ import com.clickhouse.logging.LoggerFactory;
 /**
  * A stream response from server.
  */
+@Deprecated
 public class ClickHouseStreamResponse implements ClickHouseResponse {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseStreamResponse.class);
 
     private static final long serialVersionUID = 2271296998310082447L;
 
+    private final TimeZone timeZone;
+
     protected static final List<ClickHouseColumn> defaultTypes = Collections
             .singletonList(ClickHouseColumn.of("results", "Nullable(String)"));
-
-    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input) throws IOException {
-        return of(config, input, null, null, null);
-    }
-
+//
+//    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input) throws IOException {
+//        return of(config, input, null, null, null);
+//    }
+//
+//    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
+//            Map<String, Serializable> settings) throws IOException {
+//        return of(config, input, settings, null, null);
+//    }
+//
+//    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
+//            List<ClickHouseColumn> columns) throws IOException {
+//        return of(config, input, null, columns, null);
+//    }
+//
+//    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
+//            Map<String, Serializable> settings, List<ClickHouseColumn> columns) throws IOException {
+//        return of(config, input, settings, columns, null);
+//    }
+//
     public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
-            Map<String, Serializable> settings) throws IOException {
-        return of(config, input, settings, null, null);
-    }
-
-    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
-            List<ClickHouseColumn> columns) throws IOException {
-        return of(config, input, null, columns, null);
-    }
-
-    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
-            Map<String, Serializable> settings, List<ClickHouseColumn> columns) throws IOException {
-        return of(config, input, settings, columns, null);
-    }
-
-    public static ClickHouseResponse of(ClickHouseConfig config, ClickHouseInputStream input,
-            Map<String, Serializable> settings, List<ClickHouseColumn> columns, ClickHouseResponseSummary summary)
+                                        Map<String, Serializable> settings, List<ClickHouseColumn> columns,
+                                        ClickHouseResponseSummary summary, TimeZone timeZone)
             throws IOException {
-        return new ClickHouseStreamResponse(config, input, settings, columns, summary);
+        return new ClickHouseStreamResponse(config, input, settings, columns, summary, timeZone);
     }
 
     protected final ClickHouseConfig config;
-    protected final transient ClickHouseInputStream input;
     protected final transient ClickHouseDataProcessor processor;
-    protected final List<ClickHouseColumn> columns;
     protected final ClickHouseResponseSummary summary;
 
     private volatile boolean closed;
 
     protected ClickHouseStreamResponse(ClickHouseConfig config, ClickHouseInputStream input,
-            Map<String, Serializable> settings, List<ClickHouseColumn> columns, ClickHouseResponseSummary summary)
+            Map<String, Serializable> settings, List<ClickHouseColumn> columns, ClickHouseResponseSummary summary,
+                                       TimeZone timeZone)
             throws IOException {
-        if (config == null || input == null) {
-            throw new IllegalArgumentException("Non-null configuration and input stream are required");
-        }
 
-        this.config = config;
-        this.input = input;
-
+        this.timeZone = timeZone;
         boolean hasError = true;
         try {
+            if (timeZone != null && config.isUseServerTimeZone() && !config.getUseTimeZone().equals(timeZone)) {
+                Map<ClickHouseOption, Serializable> configOptions = new HashMap<>(config.getAllOptions());
+                configOptions.put(ClickHouseClientOption.SERVER_TIME_ZONE, timeZone.getID());
+                config = new ClickHouseConfig(configOptions);
+            }
             this.processor = ClickHouseDataStreamFactory.getInstance().getProcessor(config, input, null, settings,
                     columns);
-            this.columns = columns != null ? columns
-                    : (processor != null ? processor.getColumns() : Collections.emptyList());
             hasError = false;
         } finally {
             if (hasError) {
@@ -87,6 +92,9 @@ public class ClickHouseStreamResponse implements ClickHouseResponse {
                 }
             }
         }
+
+        this.config = config;
+
         this.closed = hasError;
         this.summary = summary != null ? summary : ClickHouseResponseSummary.EMPTY;
     }
@@ -98,6 +106,7 @@ public class ClickHouseStreamResponse implements ClickHouseResponse {
 
     @Override
     public void close() {
+        final ClickHouseInputStream input = processor.getInputStream();
         if (closed || input.isClosed()) {
             return;
         }
@@ -124,7 +133,7 @@ public class ClickHouseStreamResponse implements ClickHouseResponse {
 
     @Override
     public List<ClickHouseColumn> getColumns() {
-        return columns;
+        return this.processor.getColumns();
     }
 
     public ClickHouseFormat getFormat() {
@@ -138,7 +147,7 @@ public class ClickHouseStreamResponse implements ClickHouseResponse {
 
     @Override
     public ClickHouseInputStream getInputStream() {
-        return input;
+        return processor.getInputStream();
     }
 
     @Override
@@ -147,7 +156,20 @@ public class ClickHouseStreamResponse implements ClickHouseResponse {
             throw new UnsupportedOperationException(
                     "No data processor available for deserialization, please consider to use getInputStream instead");
         }
-
         return processor.records();
+    }
+
+    @Override
+    public TimeZone getTimeZone() {
+        return timeZone;
+    }
+
+    @Override
+    public <T> Iterable<T> records(Class<T> objClass) {
+        if (processor == null) {
+            throw new UnsupportedOperationException(
+                    "No data processor available for deserialization, please consider to use getInputStream instead");
+        }
+        return processor.records(objClass, null);
     }
 }

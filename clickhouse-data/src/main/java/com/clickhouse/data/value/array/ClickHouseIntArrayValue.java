@@ -28,6 +28,7 @@ import com.clickhouse.data.value.UnsignedInteger;
 /**
  * Wrapper of {@code int[]}.
  */
+@Deprecated
 public class ClickHouseIntArrayValue extends ClickHouseObjectValue<int[]> implements ClickHouseArraySequence {
     static final class UnsignedIntArrayValue extends ClickHouseIntArrayValue {
         @Override
@@ -583,7 +584,7 @@ public class ClickHouseIntArrayValue extends ClickHouseObjectValue<int[]> implem
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new int[length]);
         }
         return this;

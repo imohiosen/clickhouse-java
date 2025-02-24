@@ -26,6 +26,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.client.config.ClickHouseDefaults;
 import com.clickhouse.config.ClickHouseConfigChangeListener;
 import com.clickhouse.config.ClickHouseOption;
 import com.clickhouse.data.ClickHouseChecker;
@@ -47,6 +48,7 @@ import com.clickhouse.data.ClickHouseWriter;
  * Request object holding references to {@link ClickHouseClient},
  * {@link ClickHouseNode}, format, sql, options and settings etc. for execution.
  */
+@Deprecated
 @SuppressWarnings("squid:S119")
 public class ClickHouseRequest<SelfT extends ClickHouseRequest<SelfT>> implements Serializable {
     private static final Set<String> SPECIAL_SETTINGS;
@@ -55,7 +57,7 @@ public class ClickHouseRequest<SelfT extends ClickHouseRequest<SelfT>> implement
 
     static {
         Set<String> set = new HashSet<>();
-        set.add("query_id");
+        set.add(ClickHouseClientOption.QUERY_ID.getKey());
         set.add(ClickHouseClientOption.SESSION_ID.getKey());
         set.add(ClickHouseClientOption.SESSION_CHECK.getKey());
         set.add(ClickHouseClientOption.SESSION_TIMEOUT.getKey());
@@ -590,7 +592,13 @@ public class ClickHouseRequest<SelfT extends ClickHouseRequest<SelfT>> implement
                 Map<ClickHouseOption, Serializable> merged = new HashMap<>();
                 merged.putAll(clientConfig.getAllOptions());
                 merged.putAll(options);
-                config = new ClickHouseConfig(merged, node.getCredentials(clientConfig),
+
+                ClickHouseCredentials credentials = node.getCredentials(clientConfig);
+                if (merged.containsKey(ClickHouseDefaults.USER) && merged.containsKey(ClickHouseDefaults.PASSWORD)) {
+                    credentials = ClickHouseCredentials.fromUserAndPassword((String) merged.get(ClickHouseDefaults.USER),
+                            (String) merged.get(ClickHouseDefaults.PASSWORD));
+                }
+                config = new ClickHouseConfig(merged, credentials,
                         clientConfig.getNodeSelector(), clientConfig.getMetricRegistry().orElse(null));
             }
         }
@@ -1581,7 +1589,7 @@ public class ClickHouseRequest<SelfT extends ClickHouseRequest<SelfT>> implement
     }
 
     /**
-     * Sets parameterized query and optinally query id.
+     * Sets parameterized query and optionally query id.
      *
      * @param query   non-null parameterized query
      * @param queryId query id, null means no query id
@@ -1603,7 +1611,7 @@ public class ClickHouseRequest<SelfT extends ClickHouseRequest<SelfT>> implement
     }
 
     /**
-     * Sets query and optinally query id.
+     * Sets query and optionally query id.
      *
      * @param query   non-empty query
      * @param queryId query id, null means no query id

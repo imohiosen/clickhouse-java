@@ -28,6 +28,7 @@ import com.clickhouse.data.value.UnsignedByte;
 /**
  * Wrapper of {@code byte[]}.
  */
+@Deprecated
 public class ClickHouseByteArrayValue extends ClickHouseObjectValue<byte[]> implements ClickHouseArraySequence {
     static final class UnsignedByteArrayValue extends ClickHouseByteArrayValue {
         @Override
@@ -605,7 +606,7 @@ public class ClickHouseByteArrayValue extends ClickHouseObjectValue<byte[]> impl
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new byte[length]);
         }
         return this;

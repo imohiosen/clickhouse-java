@@ -4,15 +4,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
+import java.util.Base64;
+import java.util.*;
 import java.util.Map.Entry;
 
 import com.clickhouse.client.ClickHouseClient;
@@ -22,8 +20,10 @@ import com.clickhouse.client.ClickHouseNode;
 import com.clickhouse.client.ClickHouseRequest;
 import com.clickhouse.client.ClickHouseRequestManager;
 import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.client.config.ClickHouseProxyType;
 import com.clickhouse.client.http.config.ClickHouseHttpOption;
 import com.clickhouse.config.ClickHouseOption;
+import com.clickhouse.data.ClickHouseByteUtils;
 import com.clickhouse.data.ClickHouseChecker;
 import com.clickhouse.data.ClickHouseCompression;
 import com.clickhouse.data.ClickHouseExternalTable;
@@ -32,7 +32,9 @@ import com.clickhouse.data.ClickHouseOutputStream;
 import com.clickhouse.data.ClickHouseUtils;
 import com.clickhouse.logging.Logger;
 import com.clickhouse.logging.LoggerFactory;
+import org.apache.hc.core5.http.HttpHeaders;
 
+@Deprecated
 public abstract class ClickHouseHttpConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseHttpConnection.class);
 
@@ -73,9 +75,13 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
         }
     }
 
-    static String buildQueryParams(ClickHouseRequest<?> request) {
+    static String buildQueryParams(ClickHouseRequest<?> request, Map<String, Serializable> additionalParams) {
         if (request == null) {
             return "";
+        }
+
+        if (additionalParams == null) {
+            additionalParams = Collections.emptyMap();
         }
 
         ClickHouseConfig config = request.getConfig();
@@ -113,10 +119,25 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
             appendQueryParameter(builder, settingKey, String.valueOf(config.getMaxExecutionTime()));
         }
         settingKey = ClickHouseClientOption.MAX_RESULT_ROWS.getKey();
-        if (config.getMaxResultRows() > 0L && !settings.containsKey(settingKey)) {
+        boolean hasRequestSetting = settings.containsKey(settingKey);
+        if (config.getMaxResultRows() > 0L && !hasRequestSetting) {
+            // set on client level
             appendQueryParameter(builder, settingKey, String.valueOf(config.getMaxResultRows()));
-            appendQueryParameter(builder, "result_overflow_mode", "break");
+        } else if (hasRequestSetting) {
+            // set on request level
+            Object value = settings.get(settingKey);
+            if (value instanceof Number && ((Number) value).longValue() > 0L) {
+                appendQueryParameter(builder, settingKey, String.valueOf(value));
+            } else if (value instanceof String && !(((String) value).isEmpty() || "0".equals(value))) {
+                appendQueryParameter(builder, settingKey, (String) value);
+            }
         }
+
+        if (config.hasOption(ClickHouseClientOption.RESULT_OVERFLOW_MODE)) {
+            appendQueryParameter(builder, ClickHouseClientOption.RESULT_OVERFLOW_MODE.getKey(),
+                    config.getStrOption(ClickHouseClientOption.RESULT_OVERFLOW_MODE));
+        }
+
         settingKey = "log_comment";
         if (!stmts.isEmpty() && config.getBoolOption(ClickHouseClientOption.LOG_LEADING_COMMENT)
                 && !settings.containsKey(settingKey)) {
@@ -128,6 +149,13 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
         settingKey = "extremes";
         if (!settings.containsKey(settingKey)) {
             appendQueryParameter(builder, settingKey, "0");
+        }
+
+        // Handle additional parameters
+        if (additionalParams.containsKey("_roles")) {
+            Serializable value = additionalParams.get("_roles");
+            Set<String> roles = !(value instanceof Set) ? Collections.emptySet() : (Set<String>) value;
+            roles.forEach(role -> appendQueryParameter(builder, "role", role));
         }
 
         Optional<String> optionalValue = request.getSessionId();
@@ -149,8 +177,10 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
             appendQueryParameter(builder, "query_id", optionalValue.get());
         }
 
-        for (Map.Entry<String, Serializable> entry : settings.entrySet()) {
-            appendQueryParameter(builder, entry.getKey(), String.valueOf(entry.getValue()));
+        for (Entry<String, Serializable> entry : settings.entrySet()) {
+            if (!processedSettings.contains(entry.getKey())) {
+                appendQueryParameter(builder, entry.getKey(), String.valueOf(entry.getValue()));
+            }
         }
 
         if (builder.length() > 0) {
@@ -159,11 +189,16 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
         return builder.toString();
     }
 
-    static String buildUrl(String baseUrl, ClickHouseRequest<?> request) {
-        ClickHouseConfig config = request.getConfig();
+    // Settings that are processed by the client and appropriate parameters are set
+    private static final HashSet<String> processedSettings = new HashSet<>(Arrays.asList(
+            "_set_roles_stmt",
+            ClickHouseClientOption.MAX_RESULT_ROWS.getKey()
+    ));
 
+    static String buildUrl(String baseUrl, ClickHouseRequest<?> request, Map<String, Serializable> additionalParams) {
         StringBuilder builder = new StringBuilder().append(baseUrl);
-        String context = config.getStrOption(ClickHouseHttpOption.WEB_CONTEXT);
+        // TODO: Using default until we will remove
+        String context = "/";
         if (!ClickHouseChecker.isNullOrEmpty(context)) {
             char prev = '/';
             for (int i = 0, len = context.length(); i < len; i++) {
@@ -177,7 +212,7 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
             }
         }
 
-        String query = buildQueryParams(request);
+        String query = buildQueryParams(request, additionalParams);
         if (!query.isEmpty()) {
             builder.append('?').append(query);
         }
@@ -186,7 +221,7 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
     }
 
     protected static Map<String, String> createDefaultHeaders(ClickHouseConfig config, ClickHouseNode server,
-            String userAgent) {
+            String userAgent, String referer) {
         Map<String, String> map = new LinkedHashMap<>();
         boolean hasAuthorizationHeader = false;
         // add customer headers
@@ -203,22 +238,34 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
             map.put(name, value);
         }
 
+        if (!ClickHouseChecker.isNullOrEmpty(referer)) {
+            map.put("referer", referer);
+        }
+
         map.put("accept", "*/*");
         if (!config.getBoolOption(ClickHouseHttpOption.KEEP_ALIVE)) {
             map.put("connection", "Close");
         }
         map.put("user-agent", !ClickHouseChecker.isNullOrEmpty(userAgent) ? userAgent : config.getClientName());
 
-        ClickHouseCredentials credentials = server.getCredentials(config);
+        ClickHouseCredentials credentials = config.getDefaultCredentials();
         if (credentials.useAccessToken()) {
             // TODO check if auth-scheme is available and supported
             map.put("authorization", credentials.getAccessToken());
         } else if (!hasAuthorizationHeader) {
-            map.put("x-clickhouse-user", credentials.getUserName());
             if (config.isSsl() && !ClickHouseChecker.isNullOrEmpty(config.getSslCert())) {
-                map.put("x-clickhouse-ssl-certificate-auth", "on");
-            } else if (!ClickHouseChecker.isNullOrEmpty(credentials.getPassword())) {
-                map.put("x-clickhouse-key", credentials.getPassword());
+                map.put(ClickHouseHttpProto.HEADER_DB_USER, credentials.getUserName());
+                map.put(ClickHouseHttpProto.HEADER_SSL_CERT_AUTH, "on");
+            } else {
+                boolean useBasicAuthentication = config.getBoolOption(ClickHouseHttpOption.USE_BASIC_AUTHENTICATION);
+                if (useBasicAuthentication) {
+                    String password = credentials.getPassword() == null ? "" : credentials.getPassword();
+                    map.put(HttpHeaders.AUTHORIZATION, "Basic " + Base64.getEncoder()
+                            .encodeToString((credentials.getUserName() + ":" + password).getBytes(StandardCharsets.UTF_8)));
+                } else {
+                    map.put(ClickHouseHttpProto.HEADER_DB_USER, credentials.getUserName());
+                    map.put(ClickHouseHttpProto.HEADER_DB_PASSWORD, credentials.getPassword());
+                }
             }
         }
 
@@ -238,11 +285,46 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
         return map;
     }
 
+    protected static Proxy getProxy(ClickHouseConfig config) {
+        final ClickHouseProxyType proxyType = config.getProxyType();
+
+        Proxy proxy;
+        switch (proxyType) {
+            case HTTP:
+                proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(config.getProxyHost(), config.getProxyPort()));
+                break;
+            case DIRECT:
+                proxy = Proxy.NO_PROXY;
+                break;
+            case SOCKS:
+                proxy = new Proxy(Proxy.Type.SOCKS,
+                        new InetSocketAddress(config.getProxyHost(), config.getProxyPort()));
+                break;
+            default:
+                proxy = null;
+                break;
+        }
+        return proxy;
+    }
+
+    protected static String getProxyAuth(ClickHouseConfig config) {
+        String authHeader = null;
+        if (config.getProxyType() == ClickHouseProxyType.HTTP) {
+            String userName = config.getProxyUserName();
+            if (!ClickHouseChecker.isNullOrEmpty(userName)) {
+                String auth = userName + ":" + new String(config.getProxyPassword());
+                byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
+                authHeader = "Basic " + new String(encodedAuth);
+            }
+        }
+        return authHeader;
+    }
+
     protected static String parseErrorFromException(String errorCode, String serverName, IOException e, byte[] bytes) {
         log.debug("Failed to read error message[code=%s] from server [%s] due to: %s", errorCode, serverName,
                 e.getMessage());
 
-        int index = ClickHouseUtils.indexOf(bytes, ERROR_MSG_PREFIX);
+        int index = ClickHouseByteUtils.indexOf(bytes, ERROR_MSG_PREFIX);
         final String errorMsg;
         if (index > 0) {
             bytes[--index] = (byte) 'C';
@@ -328,7 +410,8 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
     protected final Map<String, String> defaultHeaders;
     protected final String url;
 
-    protected ClickHouseHttpConnection(ClickHouseNode server, ClickHouseRequest<?> request) {
+    protected ClickHouseHttpConnection(ClickHouseNode server, ClickHouseRequest<?> request,
+                                       Map<String, Serializable> additionalParams) {
         if (server == null || request == null) {
             throw new IllegalArgumentException("Non-null server and request are required");
         }
@@ -338,8 +421,9 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
 
         ClickHouseConfig c = request.getConfig();
         this.config = c;
-        this.defaultHeaders = Collections.unmodifiableMap(createDefaultHeaders(c, server, getUserAgent()));
-        this.url = buildUrl(server.getBaseUri(), request);
+        this.defaultHeaders = Collections.unmodifiableMap(createDefaultHeaders(c, server, getUserAgent(), ClickHouseHttpClient.getReferer(config)));
+        this.url = buildUrl(server.getBaseUri(), request, additionalParams);
+        log.debug("url [%s]", this.url);
     }
 
     protected void closeQuietly() {
@@ -372,14 +456,18 @@ public abstract class ClickHouseHttpConnection implements AutoCloseable {
     protected final String getUserAgent() {
         final ClickHouseConfig c = config;
         String name = c.getClientName();
+        String userAgent = getDefaultUserAgent();
+
         if (!ClickHouseClientOption.CLIENT_NAME.getDefaultValue().equals(name)) {
-            return name;
+            return name + " " + userAgent;
         }
 
-        String userAgent = getDefaultUserAgent();
         name = c.getProductName();
-        return ClickHouseClientOption.PRODUCT_NAME.getDefaultValue().equals(name) ? userAgent
-                : new StringBuilder(name).append(userAgent.substring(userAgent.indexOf('/'))).toString();
+        String version = c.getProductVersion();
+        if (!ClickHouseClientOption.PRODUCT_VERSION.equals(version)) {
+            name = name + "/" + c.getProductVersion();
+        }
+        return ClickHouseClientOption.PRODUCT_NAME.getDefaultValue().equals(name) ? userAgent : name + " " + userAgent;
     }
 
     /**

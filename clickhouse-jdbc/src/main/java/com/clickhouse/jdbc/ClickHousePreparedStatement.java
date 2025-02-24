@@ -23,6 +23,7 @@ import java.sql.Types;
 import com.clickhouse.data.ClickHouseInputStream;
 import com.clickhouse.data.format.BinaryStreamUtils;
 
+@Deprecated
 public interface ClickHousePreparedStatement extends PreparedStatement {
     @Override
     default void setNull(int parameterIndex, int sqlType) throws SQLException {
@@ -109,7 +110,17 @@ public interface ClickHousePreparedStatement extends PreparedStatement {
     @Override
     default ResultSetMetaData getMetaData() throws SQLException {
         ResultSet currentResult = getResultSet();
-        return currentResult != null ? currentResult.getMetaData() : null;
+        if (currentResult != null) {
+            return currentResult.getMetaData();
+        } else if (getLargeUpdateCount() != -1L) {
+            return null; // Update query
+        }
+
+        return describeQueryResult();
+    }
+
+    default ResultSetMetaData describeQueryResult() throws SQLException {
+        return null;
     }
 
     @Override

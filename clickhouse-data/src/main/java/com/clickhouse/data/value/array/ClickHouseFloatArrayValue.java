@@ -27,6 +27,7 @@ import com.clickhouse.data.value.ClickHouseObjectValue;
 /**
  * Wrapper of {@code float[]}.
  */
+@Deprecated
 public class ClickHouseFloatArrayValue extends ClickHouseObjectValue<float[]> implements ClickHouseArraySequence {
     private static final String TYPE_NAME = "float[]";
 
@@ -497,7 +498,7 @@ public class ClickHouseFloatArrayValue extends ClickHouseObjectValue<float[]> im
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new float[length]);
         }
         return this;

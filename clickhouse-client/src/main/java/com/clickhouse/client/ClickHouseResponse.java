@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.TimeZone;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -35,11 +36,12 @@ import com.clickhouse.data.ClickHouseRecord;
  * prefer to handle stream instead of deserialized data</li>
  * </ul>
  */
+@Deprecated
 public interface ClickHouseResponse extends AutoCloseable, Serializable {
     /**
      * Empty response that can never be closed.
      */
-    static final ClickHouseResponse EMPTY = new ClickHouseResponse() {
+    ClickHouseResponse EMPTY = new ClickHouseResponse() {
         @Override
         public List<ClickHouseColumn> getColumns() {
             return Collections.emptyList();
@@ -52,11 +54,16 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
 
         @Override
         public ClickHouseInputStream getInputStream() {
-            return null;
+            return ClickHouseInputStream.empty();
         }
 
         @Override
         public Iterable<ClickHouseRecord> records() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public <T> Iterable<T> records(Class<T> objClass) {
             return Collections.emptyList();
         }
 
@@ -69,6 +76,11 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
         public boolean isClosed() {
             // ensure the instance is "stateless"
             return false;
+        }
+
+        @Override
+        public TimeZone getTimeZone() {
+            return null;
         }
     };
 
@@ -93,9 +105,18 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
      * also means additional work is required for deserialization, especially when
      * using a binary format.
      *
-     * @return input stream for getting raw data returned from server
+     * @return non-null input stream for getting raw data returned from server
      */
     ClickHouseInputStream getInputStream();
+
+    /**
+     * Returns a server timezone if it is returned by server in a header {@code X-ClickHouse-Timezone } or
+     * other way. If not, it returns null
+     * @return server timezone from server response or null
+     */
+    default TimeZone getTimeZone() {
+        return null;
+    }
 
     /**
      * Gets the first record only. Please use {@link #records()} instead if you need
@@ -110,6 +131,20 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
     }
 
     /**
+     * Gets the first record as mapped object. Please use {@link #records(Class)}
+     * instead if you need to access the rest of records.
+     * 
+     * @param <T>      type of the mapped object
+     * @param objClass non-null class of the mapped object
+     * @return mapped object of the first record
+     * @throws NoSuchElementException when there's no record at all
+     * @throws UncheckedIOException   when failed to read data(e.g. deserialization)
+     */
+    default <T> T firstRecord(Class<T> objClass) {
+        return records(objClass).iterator().next();
+    }
+
+    /**
      * Returns an iterable collection of records which can be walked through in a
      * foreach loop. Please pay attention that: 1) {@link UncheckedIOException}
      * might be thrown when iterating through the collection; and 2) it's not
@@ -119,6 +154,18 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
      * @throws UncheckedIOException when failed to read data(e.g. deserialization)
      */
     Iterable<ClickHouseRecord> records();
+
+    /**
+     * Returns an iterable collection of mapped objects which can be walked through
+     * in a foreach loop. When {@code objClass} is null or {@link ClickHouseRecord},
+     * it's same as calling {@link #records()}.
+     *
+     * @param <T>      type of the mapped object
+     * @param objClass non-null class of the mapped object
+     * @return non-null iterable collection
+     * @throws UncheckedIOException when failed to read data(e.g. deserialization)
+     */
+    <T> Iterable<T> records(Class<T> objClass);
 
     /**
      * Pipes the contents of this response into the given output stream. Keep in
@@ -146,11 +193,21 @@ public interface ClickHouseResponse extends AutoCloseable, Serializable {
                 Spliterator.IMMUTABLE | Spliterator.NONNULL | Spliterator.ORDERED), false);
     }
 
+    /**
+     * Gets stream of mapped objects to process.
+     *
+     * @return stream of mapped objects
+     */
+    default <T> Stream<T> stream(Class<T> objClass) {
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(records(objClass).iterator(),
+                Spliterator.IMMUTABLE | Spliterator.NONNULL | Spliterator.ORDERED), false);
+    }
+
     @Override
     void close();
 
     /**
-     * Checks whether the reponse has been closed or not.
+     * Checks whether the response has been closed or not.
      *
      * @return true if the response has been closed; false otherwise
      */

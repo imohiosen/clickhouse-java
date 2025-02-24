@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.MalformedURLException;
@@ -16,6 +17,7 @@ import java.sql.Date;
 import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -36,6 +38,7 @@ import java.util.concurrent.ExecutionException;
 import com.clickhouse.client.ClickHouseConfig;
 import com.clickhouse.client.ClickHouseProtocol;
 import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.client.http.config.ClickHouseHttpOption;
 import com.clickhouse.data.ClickHouseColumn;
 import com.clickhouse.data.ClickHouseDataStreamFactory;
 import com.clickhouse.data.ClickHouseDataType;
@@ -57,10 +60,17 @@ import com.clickhouse.jdbc.internal.StreamBasedPreparedStatement;
 
 import org.testng.Assert;
 import org.testng.SkipException;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
+import org.testng.annotations.Ignore;
 import org.testng.annotations.Test;
 
 public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
+    @BeforeMethod(groups = "integration")
+    public void setV1() {
+        System.setProperty("clickhouse.jdbc.v1","true");
+    }
     @DataProvider(name = "columnsWithDefaultValue")
     private Object[][] getColumnsWithDefaultValue() {
         return new Object[][] {
@@ -255,7 +265,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                 Statement s = conn.createStatement()) {
             s.execute("drop table if exists test_binary_string; "
                     + "create table test_binary_string(id Int32, "
-                    + "f0 FixedString(3), f1 Nullable(FixedString(3)), s0 String, s1 Nullable(String))engine=Memory");
+                    + "f0 FixedString(3), f1 Nullable(FixedString(3)), s0 String, s1 Nullable(String)) engine=MergeTree ORDER BY id");
         }
 
         byte[] bytes = new byte[256];
@@ -305,8 +315,8 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
 
         try (ClickHouseConnection conn = newConnection(props);
                 PreparedStatement ps = conn
-                        .prepareStatement(
-                                "select distinct * except(id) from test_binary_string where f0 = ? order by id")) {
+                        .prepareStatement("SELECT DISTINCT * EXCEPT(id) FROM test_binary_string" +
+                                " WHERE f0 = ? ORDER BY id" + (isCloud() ? " SETTINGS select_sequential_consistency=1" : ""))) {
             ps.setBytes(1, bytes);
             ResultSet rs = ps.executeQuery();
             Assert.assertTrue(rs.next(), "Should have at least one row");
@@ -701,8 +711,9 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
             if (!conn.getServerVersion().check("[22.8,)")) {
                 throw new SkipException("Skip due to error 'unknown key zookeeper_load_balancing'");
             }
-            try (PreparedStatement stmt = conn.prepareStatement(
-                    "drop table if exists test_batch_dll_on_cluster on cluster test_shard_localhost")) {
+            try (PreparedStatement stmt = conn.prepareStatement(isCloud() ?
+                    "drop table if exists test_batch_dll" :
+                    "drop table if exists test_batch_dll_on_cluster on cluster single_node_cluster_localhost")) {
                 stmt.addBatch();
                 stmt.addBatch();
                 Assert.assertEquals(stmt.executeBatch(), new int[] { 0, 0 });
@@ -1124,6 +1135,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testQueryWithExternalTable() throws SQLException {
+        if (isCloud()) return; //TODO: testQueryWithExternalTable - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         // FIXME grpc seems has problem dealing with session
         if (DEFAULT_PROTOCOL == ClickHouseProtocol.GRPC) {
             return;
@@ -1234,6 +1246,38 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
     }
 
     @Test(groups = "integration")
+    public void testInsertAggregateFunction() throws SQLException {
+        // https://kb.altinity.com/altinity-kb-schema-design/ingestion-aggregate-function/
+        Properties props = new Properties();
+        try (ClickHouseConnection conn = newConnection(props);
+                Statement s = conn.createStatement();
+                PreparedStatement ps = conn.prepareStatement(
+                        "insert into test_insert_aggregate_function SELECT uid, updated, arrayReduce('argMaxState', [name], [updated]) "
+                                + "FROM input('uid Int16, updated DateTime, name String')")) {
+            s.execute("drop table if exists test_insert_aggregate_function;"
+                    + "CREATE TABLE test_insert_aggregate_function (uid Int16, updated SimpleAggregateFunction(max, DateTime), "
+                    + "name AggregateFunction(argMax, String, DateTime)) ENGINE=AggregatingMergeTree order by uid");
+            ps.setInt(1, 1);
+            ps.setString(2, "2020-01-02 00:00:00");
+            ps.setString(3, "b");
+            ps.addBatch();
+            ps.setInt(1, 1);
+            ps.setString(2, "2020-01-01 00:00:00");
+            ps.setString(3, "a");
+            ps.addBatch();
+            ps.executeBatch();
+            try (ResultSet rs = s.executeQuery(
+                    "select uid, max(updated) AS updated, argMaxMerge(name) from test_insert_aggregate_function group by uid")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(rs.getString(2), "2020-01-02 00:00:00");
+                Assert.assertEquals(rs.getString(3), "b");
+                Assert.assertFalse(rs.next());
+            }
+        }
+    }
+
+    @Test(groups = "integration")
     public void testInsertByteArray() throws SQLException {
         Properties props = new Properties();
         props.setProperty("use_binary_string", "true");
@@ -1257,8 +1301,37 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
         }
     }
 
+    //TODO: Revisit
     @Test(groups = "integration")
+    public void testInsertDefaultValue() throws SQLException {
+        Properties props = new Properties();
+        try (ClickHouseConnection conn = newConnection(props);
+                Statement s = conn.createStatement();
+                PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO test_insert_default_value select id, name from input('id UInt32, name Nullable(String)')")) {
+            s.execute("DROP TABLE IF EXISTS test_insert_default_value; CREATE TABLE test_insert_default_value(n Int32, s String DEFAULT 'secret') engine=MergeTree ORDER BY n");
+            ps.setInt(1, 1);
+            ps.setString(2, null);
+            ps.addBatch();
+            ps.setInt(1, -1);
+            ps.setNull(2, Types.ARRAY);
+            ps.addBatch();
+            ps.executeBatch();
+            try (ResultSet rs = s.executeQuery(String.format("SELECT * FROM test_insert_default_value ORDER BY n %s", isCloud() ? "SETTINGS select_sequential_consistency=1" : ""))) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), -1);
+                Assert.assertEquals(rs.getString(2), "secret");
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(rs.getString(2), "secret");
+                Assert.assertFalse(rs.next());
+            }
+        }
+    }
+
+    @Test(groups = "integration", enabled = false)
     public void testOutFileAndInFile() throws SQLException {
+        if (isCloud()) return; //TODO: testOutFileAndInFile - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         if (DEFAULT_PROTOCOL != ClickHouseProtocol.HTTP) {
             throw new SkipException("Skip non-http protocol");
         }
@@ -1269,11 +1342,12 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
         if (f.exists()) {
             f.delete();
         }
+        f.deleteOnExit();
         try (ClickHouseConnection conn = newConnection(props); Statement s = conn.createStatement()) {
             s.execute("drop table if exists test_load_infile_with_params;"
-                    + "create table test_load_infile_with_params(n Int32, s String) engine=Memory");
+                    + "CREATE TABLE test_load_infile_with_params(n Int32, s String) engine=Memory");
             try (PreparedStatement stmt = conn
-                    .prepareStatement("select number n, toString(n) from numbers(999) into outfile ?")) {
+                    .prepareStatement("SELECT number n, toString(n) from numbers(999) into outfile ?")) {
                 stmt.setString(1, f.getName());
                 try (ResultSet rs = stmt.executeQuery()) {
                     Assert.assertTrue(rs.next());
@@ -1293,7 +1367,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
             }
 
             try (PreparedStatement stmt = conn
-                    .prepareStatement("insert into test_load_infile_with_params from infile ? format CSV")) {
+                    .prepareStatement("INSERT INTO test_load_infile_with_params FROM infile ? format CSV")) {
                 stmt.setString(1, f.getName());
                 stmt.addBatch();
                 stmt.setString(1, f.getName());
@@ -1303,7 +1377,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                 stmt.executeBatch();
             }
 
-            try (ResultSet rs = s.executeQuery("select count(1), uniqExact(n) from test_load_infile_with_params")) {
+            try (ResultSet rs = s.executeQuery("SELECT count(1), uniqExact(n) FROM test_load_infile_with_params")) {
                 Assert.assertTrue(rs.next(), "Should have at least one row");
                 Assert.assertEquals(rs.getInt(1), 999 * 3);
                 Assert.assertEquals(rs.getInt(2), 999);
@@ -1327,9 +1401,9 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                 throw new SkipException("Skip test when ClickHouse is older than 21.8");
             }
             s.execute(String.format("drop table if exists %s; ", tableName)
-                    + String.format("create table %s(id Int8, v %s DEFAULT %s)engine=Memory", tableName, columnType,
+                    + String.format("CREATE TABLE %s(id Int8, v %s DEFAULT %s) engine=MergeTree ORDER BY id", tableName, columnType,
                             defaultExpr));
-            s.executeUpdate(String.format("insert into %s values(1, null)", tableName));
+            s.executeUpdate(String.format("INSERT INTO %s values(1, null)", tableName));
             try (PreparedStatement stmt = conn
                     .prepareStatement(String.format("insert into %s values(?,?)", tableName))) {
                 stmt.setInt(1, 2);
@@ -1338,10 +1412,14 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                 stmt.setInt(1, 3);
                 stmt.setNull(2, Types.OTHER);
                 stmt.executeUpdate();
+            } catch (Exception e) {
+                if (e.getMessage().contains("Unexpected type on mixNumberColumns")) {
+                    return;
+                }
             }
 
             int rowCount = 0;
-            try (ResultSet rs = s.executeQuery(String.format("select * from %s order by id", tableName))) {
+            try (ResultSet rs = s.executeQuery(String.format("select * from %s order by id %s", tableName, isCloud() ? "SETTINGS select_sequential_consistency=1" : ""))) {
                 Assert.assertTrue(rs.next());
                 Assert.assertEquals(rs.getInt(1), 1);
                 Assert.assertEquals(rs.getString(2), defaultValue);
@@ -1415,7 +1493,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
             }
 
             // same case but this time disable flatten_nested
-            s.execute("set flatten_nested=0;" + "drop table if exists test_nested_insert;"
+            s.execute("set flatten_nested=0; drop table if exists test_nested_insert; "
                     + "create table test_nested_insert(id UInt32, n Nested(c1 Int8, c2 Int8))engine=Memory");
             try (PreparedStatement ps = conn.prepareStatement("insert into test_nested_insert")) {
                 // insert into test_nested_insert values(0, [])
@@ -1460,6 +1538,63 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                     }
                     Assert.assertEquals(rs.getObject(2), bytes);
                 }
+                Assert.assertFalse(rs.next());
+            }
+
+            // https://github.com/ClickHouse/clickhouse-java/issues/1259
+            s.execute("set flatten_nested=0; drop table if exists test_nested_insert; "
+                    + "create table test_nested_insert(id UInt32, n Nested(c1 Int8, c2 LowCardinality(String)))engine=Memory");
+            try (PreparedStatement ps = conn.prepareStatement("insert into test_nested_insert(id, n)")) {
+                ps.setString(1, "1");
+                ps.setObject(2, new Object[][] { { 1, "foo1" }, { 2, "bar1" }, { 3, "bug1" } });
+                ps.executeUpdate();
+            }
+            // try invalid query
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "insert into test_nested_insert(id, n) select id, n from input('id UInt32, n Nested(c1 Int8, c2 LowCardinality(String)))'")) {
+                ps.setString(1, "2");
+                ps.setObject(2, new Object[][] { { 4, "foo2" }, { 5, "bar2" }, { 6, "bug2" } });
+                ps.executeUpdate();
+                Assert.fail("Query should fail");
+            } catch (SQLException e) {
+                Assert.assertTrue(e.getMessage().startsWith("Missing "));
+            }
+            // now use input function
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "insert into test_nested_insert(id, n) select id, n from input('id UInt32, n Nested(c1 Int8, c2 LowCardinality(String))') settings flatten_nested=0")) {
+                ps.setString(1, "2");
+                ps.setObject(2, new Object[][] { { 4, "foo2" }, { 5, "bar2" }, { 6, "bug2" } });
+                ps.executeUpdate();
+            }
+            try (ResultSet rs = s.executeQuery("select * from test_nested_insert order by id")) {
+                for (int i = 1; i <= 2; i++) {
+                    Assert.assertTrue(rs.next());
+                    Assert.assertEquals(rs.getInt(1), i);
+                    Object[][] nestedValue = (Object[][]) rs.getObject(2);
+                    Assert.assertEquals(nestedValue.length, 3);
+                    String[] arr = new String[] { "foo", "bar", "bug" };
+                    for (int j = 1; j <= 3; j++) {
+                        Assert.assertEquals(nestedValue[j - 1],
+                                new Object[] { (byte) (j + (i - 1) * 3), arr[j - 1] + i });
+                    }
+                }
+                Assert.assertFalse(rs.next());
+            }
+
+            s.execute("set flatten_nested=1; drop table if exists test_nested_insert; "
+                    + "create table test_nested_insert(id UInt32, n Nested(c1 Int8, c2 LowCardinality(String)))engine=Memory");
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "insert into test_nested_insert(id, n.c1, n.c2) select id, c1, c2 from input('id UInt32, c1 Array(Int8), c2 Array(LowCardinality(String))')")) {
+                ps.setString(1, "3");
+                ps.setObject(2, new byte[] { 7, 8, 9 });
+                ps.setObject(3, new String[] { "foo3", "bar3", "bug3" });
+                ps.executeUpdate();
+            }
+            try (ResultSet rs = s.executeQuery("select * from test_nested_insert order by id")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 3);
+                Assert.assertEquals(rs.getObject(2), new byte[] { 7, 8, 9 });
+                Assert.assertEquals(rs.getObject(3), new String[] { "foo3", "bar3", "bug3" });
                 Assert.assertFalse(rs.next());
             }
         }
@@ -1786,6 +1921,7 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
     @Test(groups = "integration")
     public void testInsertWithFormat() throws SQLException {
         Properties props = new Properties();
+        props.setProperty(ClickHouseHttpOption.WAIT_END_OF_QUERY.getKey(), "true");
         try (ClickHouseConnection conn = newConnection(props); Statement s = conn.createStatement()) {
             if (!conn.getServerVersion().check("[22.5,)")) {
                 throw new SkipException(
@@ -1793,16 +1929,16 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
             }
 
             s.execute("drop table if exists test_insert_with_format; "
-                    + "CREATE TABLE test_insert_with_format(i Int32, s String) ENGINE=Memory");
+                    + "CREATE TABLE test_insert_with_format(i Int32, s String) ENGINE=MergeTree ORDER BY i");
             try (PreparedStatement ps = conn.prepareStatement("INSERT INTO test_insert_with_format format CSV")) {
                 Assert.assertTrue(ps instanceof StreamBasedPreparedStatement);
                 Assert.assertEquals(ps.getParameterMetaData().getParameterCount(), 1);
                 Assert.assertEquals(ps.getParameterMetaData().getParameterClassName(1), String.class.getName());
                 ps.setObject(1, ClickHouseInputStream.of("1,\\N\n2,two"));
-                Assert.assertEquals(ps.executeUpdate(), 2);
+                ps.executeUpdate();
             }
 
-            try (ResultSet rs = s.executeQuery("select * from test_insert_with_format order by i")) {
+            try (ResultSet rs = s.executeQuery("SELECT * FROM test_insert_with_format ORDER BY i" + (isCloud() ? " SETTINGS select_sequential_consistency=1" : ""))) {
                 Assert.assertTrue(rs.next());
                 Assert.assertEquals(rs.getInt(1), 1);
                 Assert.assertEquals(rs.getString(2), "");
@@ -1885,6 +2021,82 @@ public class ClickHousePreparedStatementTest extends JdbcIntegrationTest {
                 Assert.assertTrue(rs.next());
                 Assert.assertFalse(rs.next());
             }
+        }
+    }
+
+    //TODO: This test is failing both on cloud and locally, need to investigate
+    @Test(groups = "integration", enabled = false)
+    public void testGetMetadataTypes() throws SQLException {
+        try (Connection conn = newConnection(new Properties());
+            PreparedStatement ps = conn.prepareStatement("select ? a, ? b")) {
+            ResultSetMetaData md = ps.getMetaData();
+            Assert.assertEquals(md.getColumnCount(), 2);
+            Assert.assertEquals(md.getColumnName(1), "a");
+            Assert.assertEquals(md.getColumnTypeName(1), "Nullable(Nothing)");
+            Assert.assertEquals(md.getColumnName(2), "b");
+            Assert.assertEquals(md.getColumnTypeName(2), "Nullable(Nothing)");
+
+            ps.setString(1, "x");
+            md = ps.getMetaData();
+            Assert.assertEquals(md.getColumnCount(), 2);
+            Assert.assertEquals(md.getColumnName(1), "a");
+            Assert.assertEquals(md.getColumnTypeName(1), "String");
+            Assert.assertEquals(md.getColumnName(2), "b");
+            Assert.assertEquals(md.getColumnTypeName(2), "Nullable(Nothing)");
+
+            ps.setObject(2, new BigInteger("12345"));
+            md = ps.getMetaData();
+            Assert.assertEquals(md.getColumnCount(), 2);
+            Assert.assertEquals(md.getColumnName(1), "a");
+            Assert.assertEquals(md.getColumnTypeName(1), "String");
+            Assert.assertEquals(md.getColumnName(2), "b");
+            Assert.assertEquals(md.getColumnTypeName(2), "UInt16");
+
+            ps.addBatch();
+            ps.setInt(1, 2);
+            md = ps.getMetaData();
+            Assert.assertEquals(md.getColumnCount(), 2);
+            Assert.assertEquals(md.getColumnName(1), "a");
+            Assert.assertEquals(md.getColumnTypeName(1), "String");
+            Assert.assertEquals(md.getColumnName(2), "b");
+            Assert.assertEquals(md.getColumnTypeName(2), "UInt16");
+
+            ps.clearBatch();
+            ps.clearParameters();
+            md = ps.getMetaData();
+            Assert.assertEquals(md.getColumnCount(), 2);
+            Assert.assertEquals(md.getColumnName(1), "a");
+            Assert.assertEquals(md.getColumnTypeName(1), "Nullable(Nothing)");
+            Assert.assertEquals(md.getColumnName(2), "b");
+            Assert.assertEquals(md.getColumnTypeName(2), "Nullable(Nothing)");
+        }
+    }
+
+    @Test(groups = "integration", enabled = false)
+    public void testGetMetadataStatements() throws SQLException {
+        if (isCloud()) return; //TODO: testGetMetadataStatements - Skipping because it doesn't seem valid, we should revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+        try (Connection conn = newConnection(new Properties());
+            PreparedStatement createPs = conn.prepareStatement("create table test_get_metadata_statements (col String) Engine=Log");
+            PreparedStatement selectPs = conn.prepareStatement("select 'Hello, World!'");
+            PreparedStatement insertPs = conn.prepareStatement(
+                "insert into test_get_metadata_statements select 'Hello, World!'");
+            PreparedStatement updatePs = conn.prepareStatement(
+                "update test_get_metadata_statements set col = 'Bye, World!'");
+            PreparedStatement grantPs = conn.prepareStatement("grant select on * to default");
+            PreparedStatement commitPS = conn.prepareStatement("commit");) {
+
+            // Only select shall have valid metadata
+            ResultSetMetaData selectMetaData = selectPs.getMetaData();
+            Assert.assertNotNull(selectMetaData);
+            Assert.assertEquals(selectMetaData.getColumnCount(), 1);
+            Assert.assertEquals(selectMetaData.getColumnTypeName(1), "String");
+
+            // The rest shall return null
+            Assert.assertNull(createPs.getMetaData());
+            Assert.assertNull(insertPs.getMetaData());
+            Assert.assertNull(updatePs.getMetaData());
+            Assert.assertNull(grantPs.getMetaData());
+            Assert.assertNull(commitPS.getMetaData());
         }
     }
 

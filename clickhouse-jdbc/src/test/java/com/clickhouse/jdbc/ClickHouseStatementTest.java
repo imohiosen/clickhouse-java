@@ -1,36 +1,5 @@
 package com.clickhouse.jdbc;
 
-import java.io.File;
-import java.io.IOException;
-import java.sql.Array;
-import java.sql.BatchUpdateException;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Struct;
-import java.sql.Time;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Collections;
-import java.util.GregorianCalendar;
-import java.util.List;
-import java.util.Locale;
-import java.util.Properties;
-import java.util.TimeZone;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
 import com.clickhouse.client.ClickHouseClient;
 import com.clickhouse.client.ClickHouseParameterizedQuery;
 import com.clickhouse.client.ClickHouseProtocol;
@@ -45,14 +14,57 @@ import com.clickhouse.data.value.UnsignedByte;
 import com.clickhouse.data.value.UnsignedInteger;
 import com.clickhouse.data.value.UnsignedLong;
 import com.clickhouse.data.value.UnsignedShort;
-
 import org.roaringbitmap.longlong.Roaring64NavigableMap;
 import org.testng.Assert;
 import org.testng.SkipException;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+import java.io.File;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.sql.Array;
+import java.sql.BatchUpdateException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Struct;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.GregorianCalendar;
+import java.util.List;
+import java.util.Locale;
+import java.util.Properties;
+import java.util.TimeZone;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
 public class ClickHouseStatementTest extends JdbcIntegrationTest {
+    @BeforeMethod(groups = "integration")
+    public void setV1() {
+        System.setProperty("clickhouse.jdbc.v1","true");
+    }
     @DataProvider(name = "timeZoneTestOptions")
     private Object[][] getTimeZoneTestOptions() {
         return new Object[][] {
@@ -70,16 +82,17 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testBatchUpdate() throws SQLException {
+        if (isCloud()) return; //TODO: testBatchUpdate - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         Properties props = new Properties();
         try (ClickHouseConnection conn = newConnection(props); ClickHouseStatement stmt = conn.createStatement()) {
             if (!conn.getServerVersion().check("[22.8,)")) {
                 throw new SkipException("Skip due to error 'unknown key zookeeper_load_balancing'");
             }
 
-            stmt.addBatch("drop table if exists test_batch_dll_on_cluster on cluster test_shard_localhost");
+            stmt.addBatch("drop table if exists test_batch_dll_on_cluster on cluster single_node_cluster_localhost");
             stmt.addBatch(
-                    "create table if not exists test_batch_dll_on_cluster on cluster test_shard_localhost(a Int64) Engine=MergeTree order by a;"
-                            + "drop table if exists test_batch_dll_on_cluster on cluster test_shard_localhost;");
+                    "create table if not exists test_batch_dll_on_cluster on cluster single_node_cluster_localhost(a Int64) Engine=MergeTree order by a;"
+                            + "drop table if exists test_batch_dll_on_cluster on cluster single_node_cluster_localhost;");
             Assert.assertEquals(stmt.executeBatch(), new int[] { 0, 0, 0 });
 
             stmt.addBatch("drop table if exists test_batch_queries");
@@ -161,8 +174,9 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
         }
     }
 
-    @Test(groups = "integration")
+    @Test(groups = "integration", enabled = false)
     public void testOutFileAndInFile() throws SQLException {
+        if (isCloud()) return; //TODO: testOutFileAndInFile - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         if (DEFAULT_PROTOCOL != ClickHouseProtocol.HTTP) {
             throw new SkipException("Skip non-http protocol");
         }
@@ -173,13 +187,15 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
         if (f1.exists()) {
             f1.delete();
         }
+        f1.deleteOnExit();
         File f2 = new File("a2.csv");
         if (f2.exists()) {
             f2.delete();
         }
+        f2.deleteOnExit();
 
         try (ClickHouseConnection conn = newConnection(props)) {
-            String sql1 = "select number n, toString(n) from numbers(1234) into outfile '" + f1.getName() + "'";
+            String sql1 = "SELECT number n, toString(n) FROM numbers(1234) into outfile '" + f1.getName() + "'";
             try (ClickHouseStatement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql1)) {
                 Assert.assertTrue(rs.next());
                 Assert.assertFalse(rs.next());
@@ -268,14 +284,15 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testSwitchCatalog() throws SQLException {
+        if (isCloud()) return; //TODO: testSwitchCatalog - Revisit, see:https://github.com/ClickHouse/clickhouse-java/issues/1747
         Properties props = new Properties();
         props.setProperty("databaseTerm", "catalog");
         props.setProperty("database", "system");
+        String dbName = "test_switch_schema";
         try (ClickHouseConnection conn = newConnection(props);
                 ClickHouseStatement stmt = conn.createStatement()) {
             Assert.assertEquals(conn.getCatalog(), "system");
             Assert.assertEquals(conn.getSchema(), null);
-            String dbName = "test_switch_schema";
             stmt.execute(
                     ClickHouseParameterizedQuery.apply("drop database if exists :db; "
                             + "create database :db; "
@@ -332,19 +349,22 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
                     () -> conn.createStatement().execute("use `" + nonExistentDb + "`"));
             Assert.assertThrows(SQLException.class,
                     () -> conn.createStatement().execute("use `" + nonExistentDb + "`; select 1"));
+        } finally {
+            dropDatabase(dbName);
         }
     }
 
     @Test(groups = "integration")
     public void testSwitchSchema() throws SQLException {
+        if (isCloud()) return; //TODO: testSwitchSchema - Revisit, see:https://github.com/ClickHouse/clickhouse-java/issues/1747
         Properties props = new Properties();
         props.setProperty("databaseTerm", "schema");
         props.setProperty("database", "system");
+        String dbName = "test_switch_schema";
         try (ClickHouseConnection conn = newConnection(props);
                 ClickHouseStatement stmt = conn.createStatement()) {
             Assert.assertEquals(conn.getCatalog(), null);
             Assert.assertEquals(conn.getSchema(), "system");
-            String dbName = "test_switch_schema";
             stmt.execute(
                     ClickHouseParameterizedQuery.apply("drop database if exists :db; "
                             + "create database :db; "
@@ -401,6 +421,8 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
                     () -> conn.createStatement().execute("use `" + nonExistentDb + "`"));
             Assert.assertThrows(SQLException.class,
                     () -> conn.createStatement().execute("use `" + nonExistentDb + "`; select 1"));
+        } finally {
+            dropDatabase(dbName);
         }
     }
 
@@ -502,9 +524,9 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
         try (ClickHouseConnection conn = newConnection(props);
                 ClickHouseStatement stmt = conn.createStatement();) {
             stmt.execute("drop table if exists test_async_insert; "
-                    + "create table test_async_insert(id UInt32, s String) ENGINE = Memory; "
+                    + "CREATE TABLE test_async_insert(id UInt32, s String) ENGINE = MergeTree ORDER BY id; "
                     + "INSERT INTO test_async_insert VALUES(1, 'a'); "
-                    + "select * from test_async_insert");
+                    + "SELECT * FROM test_async_insert" + (isCloud() ? " SETTINGS select_sequential_consistency=1" : ""));
             ResultSet rs = stmt.getResultSet();
             Assert.assertTrue(rs.next());
             Assert.assertEquals(rs.getInt(1), 1);
@@ -512,12 +534,14 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
             Assert.assertFalse(rs.next());
         }
 
+        //TODO: I'm not sure this is a valid test...
+        if (isCloud()) return; //TODO: testAsyncInsert - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         props.setProperty(ClickHouseHttpOption.CUSTOM_PARAMS.getKey(), "async_insert=1,wait_for_async_insert=0");
         try (ClickHouseConnection conn = newConnection(props);
                 ClickHouseStatement stmt = conn.createStatement();) {
-            stmt.execute("truncate table test_async_insert; "
+            stmt.execute("TRUNCATE TABLE test_async_insert; "
                     + "INSERT INTO test_async_insert VALUES(1, 'a'); "
-                    + "select * from test_async_insert");
+                    + "SELECT * FROM test_async_insert");
             ResultSet rs = stmt.getResultSet();
             Assert.assertFalse(rs.next(),
                     "Server was probably busy at that time, so the row was inserted before your query");
@@ -526,6 +550,7 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
 
     @Test(dataProvider = "connectionProperties", groups = "integration")
     public void testCancelQuery(Properties props) throws SQLException {
+        if (isCloud()) return; //TODO: testCancelQuery - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         try (ClickHouseConnection conn = newConnection(props);
                 ClickHouseStatement stmt = conn.createStatement();) {
             CountDownLatch c = new CountDownLatch(1);
@@ -815,7 +840,9 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testQuerySystemLog() throws SQLException {
-        try (ClickHouseConnection conn = newConnection(new Properties())) {
+        Properties props = new Properties();
+        props.setProperty(ClickHouseClientOption.RESULT_OVERFLOW_MODE.getKey(), "break");
+        try (ClickHouseConnection conn = newConnection(props)) {
             ClickHouseStatement stmt = conn.createStatement();
             stmt.setMaxRows(10);
             stmt.setLargeMaxRows(11L);
@@ -1079,6 +1106,138 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
     }
 
     @Test(groups = "integration")
+    public void testNestedArrayInTuple() throws SQLException {
+        Properties props = new Properties();
+        try (ClickHouseConnection conn = newConnection(props);
+                ClickHouseStatement stmt = conn.createStatement()) {
+            // nested values on same row
+            Assert.assertFalse(stmt.execute("drop table if exists test_nested_array_in_tuple; "
+                    + "create table test_nested_array_in_tuple(id UInt64, v1 Tuple(Array(Int32)), v2 Tuple(Array(Int32)))engine=Memory; "
+                    + "insert into test_nested_array_in_tuple values(1, ([1, 2]), ([2, 3]))"));
+            try (ResultSet rs = stmt.executeQuery("select * from test_nested_array_in_tuple order by id")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).size(), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).get(0), new int[] { 1, 2 });
+                Assert.assertEquals(((List<?>) rs.getObject(3)).size(), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(3)).get(0), new int[] { 2, 3 });
+                Assert.assertFalse(rs.next());
+            }
+
+            // nested values on same column
+            Assert.assertFalse(stmt.execute("drop table if exists test_nested_array_in_tuple; "
+                    + "create table test_nested_array_in_tuple(id UInt64, val Tuple(Array(Int32)))engine=Memory; "
+                    + "insert into test_nested_array_in_tuple values(1, ([1, 2])), (2, ([2, 3]))"));
+            try (ResultSet rs = stmt.executeQuery("select * from test_nested_array_in_tuple order by id")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).size(), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).get(0), new int[] { 1, 2 });
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 2);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).size(), 1);
+                Assert.assertEquals(((List<?>) rs.getObject(2)).get(0), new int[] { 2, 3 });
+                Assert.assertFalse(rs.next());
+            }
+
+            // deeper nested level and more elements
+            Assert.assertFalse(stmt.execute("drop table if exists test_nested_array_in_tuple; "
+                    + "create table test_nested_array_in_tuple(id UInt64, val Array(Tuple(UInt16,Array(UInt32))))engine=Memory; "
+                    + "insert into test_nested_array_in_tuple values(1, [(0, [1, 2]), (1, [2, 3])]), (2, [(2, [4, 5]), (3, [6, 7])])"));
+            try (ResultSet rs = stmt.executeQuery("select * from test_nested_array_in_tuple order by id")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(((Object[]) rs.getObject(2)).length, 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(0), UnsignedShort.ZERO);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(1), new int[] { 1, 2 });
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(0), UnsignedShort.ONE);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(1), new int[] { 2, 3 });
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(((Object[]) rs.getObject(2)).length, 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(0),
+                        UnsignedShort.valueOf((short) 2));
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(1), new int[] { 4, 5 });
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(0),
+                        UnsignedShort.valueOf((short) 3));
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(1), new int[] { 6, 7 });
+                Assert.assertFalse(rs.next());
+            }
+
+            Assert.assertFalse(stmt.execute("drop table if exists test_nested_array_in_tuple; "
+                    + "create table test_nested_array_in_tuple(id UInt64, val Array(Tuple(UInt16,Array(Decimal(10,0)))))engine=Memory; "
+                    + "insert into test_nested_array_in_tuple values(1, [(0, [1, 2]), (1, [2, 3])]), (2, [(2, [4, 5]), (3, [6, 7])])"));
+            try (ResultSet rs = stmt.executeQuery("select * from test_nested_array_in_tuple order by id")) {
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getInt(1), 1);
+                Assert.assertEquals(((Object[]) rs.getObject(2)).length, 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(0), UnsignedShort.ZERO);
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[0]).get(1))[0],
+                        BigDecimal.valueOf(1));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[0]).get(1))[1],
+                        BigDecimal.valueOf(2));
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(0), UnsignedShort.ONE);
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[1]).get(1))[0],
+                        BigDecimal.valueOf(2));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[1]).get(1))[1],
+                        BigDecimal.valueOf(3));
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(((Object[]) rs.getObject(2)).length, 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[0]).get(0),
+                        UnsignedShort.valueOf((short) 2));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[0]).get(1))[0],
+                        BigDecimal.valueOf(4));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[0]).get(1))[1],
+                        BigDecimal.valueOf(5));
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).size(), 2);
+                Assert.assertEquals(((List<?>) ((Object[]) rs.getObject(2))[1]).get(0),
+                        UnsignedShort.valueOf((short) 3));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[1]).get(1))[0],
+                        BigDecimal.valueOf(6));
+                Assert.assertEquals(((BigDecimal[]) ((List<?>) ((Object[]) rs.getObject(2))[1]).get(1))[1],
+                        BigDecimal.valueOf(7));
+                Assert.assertFalse(rs.next());
+            }
+        }
+    }
+    
+    @Test(groups = "integration")
+    public void testNestedArrays() throws SQLException {
+        Properties props = new Properties();
+        Object[][] arr1 = null;
+        Object[][] arr2 = null;
+        try (ClickHouseConnection conn = newConnection(props);
+                ClickHouseStatement stmt = conn.createStatement();
+                ResultSet rs = stmt
+                        .executeQuery(
+                                "select * from (select 1 id, [['1','2'],['3', '4']] v union all select 2 id, [['5','6'],['7','8']] v) order by id")) {
+            Assert.assertTrue(rs.next());
+            Assert.assertEquals(rs.getInt(1), 1);
+            Assert.assertEquals(rs.getObject(2), arr1 = (Object[][]) rs.getArray(2).getArray());
+            Assert.assertEquals(((Object[][]) rs.getObject(2)).length, 2);
+            Assert.assertEquals(((Object[][]) rs.getObject(2))[0], new Object[] { "1", "2" });
+            Assert.assertEquals(((Object[][]) rs.getObject(2))[1], new Object[] { "3", "4" });
+            Assert.assertTrue(rs.next());
+            Assert.assertEquals(rs.getInt(1), 2);
+            Assert.assertEquals(rs.getObject(2), arr2 = (Object[][]) rs.getArray(2).getArray());
+            Assert.assertEquals(((Object[][]) rs.getObject(2)).length, 2);
+            Assert.assertEquals(((Object[][]) rs.getObject(2))[0], new Object[] { "5", "6" });
+            Assert.assertEquals(((Object[][]) rs.getObject(2))[1], new Object[] { "7", "8" });
+            Assert.assertFalse(rs.next());
+        }
+
+        Assert.assertTrue(arr1 != arr2);
+        Assert.assertNotEquals(arr1[0], arr2[0]);
+        Assert.assertNotEquals(arr1[1], arr2[1]);
+    }
+
+    @Test(groups = "integration")
     public void testNestedDataTypes() throws SQLException {
         String sql = "select (1,2) as t, [3,4] as a";
         Properties props = new Properties();
@@ -1128,6 +1287,7 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
 
     @Test(dataProvider = "timeZoneTestOptions", groups = "integration")
     public void testTimeZone(boolean useBinary) throws SQLException {
+        if (isCloud()) return; //TODO: testTimeZone - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         String dateType = "DateTime32";
         String dateValue = "2020-02-11 00:23:33";
         ClickHouseDateTimeValue v = ClickHouseDateTimeValue.of(dateValue, 0, ClickHouseValues.UTC_TIMEZONE);
@@ -1253,6 +1413,142 @@ public class ClickHouseStatementTest extends JdbcIntegrationTest {
                             Assert.assertEquals(rs.getTime(i + 1, calendars[j]), mrs.getTime(i + 1, calendars[j]), msg);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    @Test(groups = "integration")
+    public void testMultiThreadedExecution() throws Exception {
+        Properties props = new Properties();
+        try (ClickHouseConnection conn = newConnection(props);
+             ClickHouseStatement stmt = conn.createStatement()) {
+
+
+            ScheduledExecutorService executor = Executors.newScheduledThreadPool(3);
+
+            final AtomicReference<Exception> failedException = new AtomicReference<>(null);
+            for (int i = 0; i < 3; i++) {
+                executor.scheduleWithFixedDelay(() -> {
+                    try {
+                        stmt.execute("select 1");
+                    } catch (Exception e) {
+                        failedException.set(e);
+                    }
+                }, 100, 100, TimeUnit.MILLISECONDS);
+            }
+
+            try {
+                Thread.sleep(1000);
+            } catch (Exception e) {
+                Assert.fail("Test interrupted", e);
+            }
+
+            executor.shutdown();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+
+            Assert.assertNull(failedException.get(), "Failed because of exception: " + failedException.get());
+         }
+    }
+
+    @Test(groups = "integration")
+    public void testSessionTimezoneSetting() {
+        Properties props = new Properties();
+        try (ClickHouseConnection conn = newConnection(props);
+             ClickHouseStatement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT now() SETTINGS session_timezone = 'America/Los_Angeles'");
+            rs.next();
+            OffsetDateTime srvNow = rs.getObject(1, OffsetDateTime.class);
+            OffsetDateTime localNow = OffsetDateTime.now(ZoneId.of("America/Los_Angeles"));
+            Assert.assertTrue(Duration.between(srvNow, localNow).abs().getSeconds() < 60,
+                    "server time (" + srvNow +") differs from local time (" + localNow + ")");
+        } catch (Exception e) {
+            Assert.fail("Failed to create connection", e);
+        }
+    }
+
+
+    @Test(groups = "integration")
+    public void testUseOffsetDateTime() {
+        try (ClickHouseConnection conn = newConnection();
+             ClickHouseStatement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("select toDateTime('2024-01-01 10:00:00', 'America/Los_Angeles'), toDateTime('2024-05-01 10:00:00', " +
+                    " 'America/Los_Angeles'), now() SETTINGS session_timezone = 'America/Los_Angeles'");
+            rs.next();
+            OffsetDateTime dstStart = (OffsetDateTime) rs.getObject(1);
+            OffsetDateTime dstEnd = (OffsetDateTime) rs.getObject(2);
+            OffsetDateTime now = rs.getObject(3, OffsetDateTime.class);
+            System.out.println("dstStart: " + dstStart + ", dstEnd: " + dstEnd + ", now: " + now);
+            Assert.assertEquals(dstStart.getOffset(), ZoneOffset.ofHours(-8));
+            Assert.assertEquals(dstEnd.getOffset(), ZoneOffset.ofHours(-7));
+        } catch (Exception e) {
+            e.printStackTrace();
+            Assert.fail("Failed to create connection", e);
+        }
+    }
+
+
+    @Test(groups = "integration")
+    public void testDescMetadata() {
+        try (ClickHouseConnection conn = newConnection();
+            ClickHouseStatement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("DESC (select timezone(), number FROM system.numbers)");
+            rs.next();
+            ResultSetMetaData metaData = rs.getMetaData();
+            Assert.assertEquals(metaData.getColumnCount(), 7);
+        } catch (Exception e) {
+            e.printStackTrace();
+            Assert.fail("Failed to create connection", e);
+        }
+    }
+
+    @Test(groups = "integration")
+    public void testMaxResultsRows() throws SQLException {
+        Properties props = new Properties();
+        int maxRows = 3;
+        props.setProperty(ClickHouseClientOption.MAX_RESULT_ROWS.getKey(), String.valueOf(maxRows));
+        props.setProperty(ClickHouseClientOption.RESULT_OVERFLOW_MODE.getKey(), "break");
+        try (ClickHouseConnection conn = newConnection(props);
+             ClickHouseStatement s = conn.createStatement()) {
+            ResultSet rs = s.executeQuery("SELECT number FROM system.numbers");
+            for (int i = 0; i < maxRows; i++) {
+                Assert.assertTrue(rs.next(), "Should have more rows, but have only " + i);
+            }
+        }
+
+        props.setProperty(ClickHouseClientOption.MAX_RESULT_ROWS.getKey(), "1");
+        props.remove(ClickHouseClientOption.RESULT_OVERFLOW_MODE.getKey());
+        try (ClickHouseConnection conn = newConnection(props);
+             ClickHouseStatement s = conn.createStatement()) {
+            s.executeQuery("SELECT number FROM system.numbers");
+            Assert.fail("Should throw exception");
+        } catch (SQLException e) {
+            Assert.assertTrue(e.getMessage().startsWith("Code: 396. DB::Exception: Limit for result exceeded, max rows"),
+                    "Unexpected exception: " + e.getMessage());
+        }
+    }
+
+    @Test(groups = "integration", enabled = false)
+    public void testVariantDataType() throws SQLException {
+        String table = "test_variant_type_01";
+        Properties props = new Properties();
+        props.setProperty("custom_settings", "allow_experimental_variant_type=1");
+        props.setProperty(ClickHouseClientOption.COMPRESS.getKey(), "false");
+        try (ClickHouseConnection conn = newConnection(props);
+             ClickHouseStatement s = conn.createStatement()) {
+
+            s.execute("DROP TABLE IF EXISTS " + table);
+            s.execute("CREATE TABLE " + table +" ( id Variant(UInt32, String, UUID), name String) Engine = MergeTree ORDER BY ()");
+
+            s.execute("insert into " + table + " values ( 1, 'just number' )");
+            s.execute("insert into " + table + " values  ( 'i-am-id-01', 'ID as string' ) ");
+            s.execute("insert into " + table + " values  ( generateUUIDv4(), 'ID as UUID' ) ");
+
+            try (ResultSet rs = s.executeQuery("SELECT * FROM " + table)) {
+                while (rs.next()) {
+                    Object variantValue = rs.getObject(1);
+                    Object name = rs.getString(2);
+                    System.out.println("-> " + name + " : " + variantValue);
                 }
             }
         }

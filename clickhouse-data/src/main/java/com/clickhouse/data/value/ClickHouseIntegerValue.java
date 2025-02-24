@@ -8,6 +8,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code int}.
  */
+@Deprecated
 public class ClickHouseIntegerValue implements ClickHouseValue {
     /**
      * Unsigned version of {@code ClickHouseIntegerValue}.
@@ -84,7 +85,14 @@ public class ClickHouseIntegerValue implements ClickHouseValue {
 
         @Override
         public ClickHouseIntegerValue update(String value) {
-            return value == null ? resetToNullOrEmpty() : set(false, Integer.parseUnsignedInt(value));
+            if (value == null) {
+                resetToNullOrEmpty();
+            } else if (value.isEmpty()) {
+                resetToDefault();
+            } else {
+                set(false, Integer.parseUnsignedInt(value));
+            }
+            return this;
         }
     }
 
@@ -348,7 +356,14 @@ public class ClickHouseIntegerValue implements ClickHouseValue {
 
     @Override
     public ClickHouseIntegerValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, Integer.parseInt(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else {
+            set(false, Integer.parseInt(value));
+        }
+        return this;
     }
 
     @Override

@@ -13,6 +13,7 @@ import java.util.TimeZone;
  * composed of key, default value(which implies type of the value) and
  * description.
  */
+@Deprecated
 public interface ClickHouseOption extends Serializable {
     /**
      * Converts given string to key value pairs.
@@ -278,6 +279,14 @@ public interface ClickHouseOption extends Serializable {
      * @return value type of the option, defaults to String
      */
     Class<? extends Serializable> getValueType();
+
+    /**
+     * Checks whether the option is sensitive or not. A sensitive option should be
+     * used carefully and be masked in logging for security reason.
+     *
+     * @return true if the option is sensitive; false otherwise
+     */
+    boolean isSensitive();
 
     /**
      * Gets name of the option.

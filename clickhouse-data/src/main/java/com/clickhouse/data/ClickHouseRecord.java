@@ -9,6 +9,7 @@ import java.util.NoSuchElementException;
  * sometimes it could a (nested) column, a (semi-)structured object, or even the
  * whole data set.
  */
+@Deprecated
 public interface ClickHouseRecord extends Iterable<ClickHouseValue>, Serializable {
     /**
      * Empty record.
@@ -72,7 +73,7 @@ public interface ClickHouseRecord extends Iterable<ClickHouseValue>, Serializabl
     @Override
     default Iterator<ClickHouseValue> iterator() {
         return new Iterator<ClickHouseValue>() {
-            int index = 0;
+            private int index = 0;
 
             @Override
             public boolean hasNext() {

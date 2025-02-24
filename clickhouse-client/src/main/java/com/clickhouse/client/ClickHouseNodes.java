@@ -38,6 +38,7 @@ import com.clickhouse.logging.LoggerFactory;
  * {@link ClickHouseLoadBalancingPolicy} is used to pickup available node and
  * moving node between lists according to its status.
  */
+@Deprecated
 public class ClickHouseNodes implements ClickHouseNodeManager {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseNodes.class);
     private static final long serialVersionUID = 4931904980127690349L;
@@ -68,6 +69,7 @@ public class ClickHouseNodes implements ClickHouseNodeManager {
         } else {
             index = 0;
         }
+        
 
         String defaultParams = "";
         Set<String> list = new LinkedHashSet<>();
@@ -95,14 +97,19 @@ public class ClickHouseNodes implements ClickHouseNodeManager {
             }
 
             int endIndex = i;
+            // parsing host name
             for (int j = i + 1; j < len; j++) {
                 ch = endpoints.charAt(j);
                 if (ch == stopChar || Character.isWhitespace(ch)) {
                     endIndex = j;
                     break;
+                } else if ( stopChar == ',' && ( ch == '/' || ch == '?' || ch == '#') ) {
+                    break;
                 }
             }
+
             if (endIndex > i) {
+                // add host name to list
                 list.add(endpoints.substring(index, endIndex).trim());
                 i = endIndex;
                 index = endIndex + 1;
@@ -415,7 +422,7 @@ public class ClickHouseNodes implements ClickHouseNodeManager {
 
             try (ClickHouseClient client = ClickHouseClient.builder().agent(false)
                     .nodeSelector(ClickHouseNodeSelector.of(server.getProtocol())).build()) {
-                ClickHouseRequest<?> request = client.connect(server)
+                ClickHouseRequest<?> request = client.read(server)
                         .format(ClickHouseFormat.RowBinaryWithNamesAndTypes);
                 String clusterName = server.getCluster();
                 Set<String> clusters = new LinkedHashSet<>();
@@ -555,15 +562,15 @@ public class ClickHouseNodes implements ClickHouseNodeManager {
         Set<ClickHouseNode> list = new LinkedHashSet<>();
         long currentTime = System.currentTimeMillis();
         boolean checkAll = template.config.getBoolOption(ClickHouseClientOption.CHECK_ALL_NODES);
-        int healthyNodeStartIndex = -1;
+        int numberOfFaultyNodes = -1;
         lock.readLock().lock();
         // TODO:
         // 1) minimize the list;
         // 2) detect flaky node and check it again later in a less frequent way
         try {
             pickNodes(faultyNodes, selector, list, groupSize, currentTime);
+            numberOfFaultyNodes = list.size();
             if (checkAll) {
-                healthyNodeStartIndex = list.size();
                 pickNodes(nodes, selector, list, groupSize, currentTime);
             }
         } finally {
@@ -589,13 +596,14 @@ public class ClickHouseNodes implements ClickHouseNodeManager {
                     update(node, Status.STANDALONE);
                 }
 
+                boolean wasFaultyBefore = numberOfFaultyNodes == -1 || count < numberOfFaultyNodes;
                 if (isAlive) {
-                    if (healthyNodeStartIndex < 0 || count < healthyNodeStartIndex) {
+                    if (wasFaultyBefore) {
                         update(n, Status.HEALTHY);
                     }
                 } else {
                     hasFaultyNode = true;
-                    if (healthyNodeStartIndex >= count) {
+                    if (!wasFaultyBefore) {
                         update(n, Status.FAULTY);
                     }
                 }

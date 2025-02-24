@@ -10,6 +10,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code float}.
  */
+@Deprecated
 public class ClickHouseFloatValue implements ClickHouseValue {
     /**
      * Create a new instance representing null value.
@@ -274,7 +275,14 @@ public class ClickHouseFloatValue implements ClickHouseValue {
 
     @Override
     public ClickHouseFloatValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, Float.parseFloat(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else {
+            set(false, Float.parseFloat(value));
+        }
+        return this;
     }
 
     @Override

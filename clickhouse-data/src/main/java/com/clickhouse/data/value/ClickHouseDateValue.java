@@ -12,6 +12,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@link LocalDate}.
  */
+@Deprecated
 public class ClickHouseDateValue extends ClickHouseObjectValue<LocalDate> {
     /**
      * Default date.
@@ -254,6 +255,8 @@ public class ClickHouseDateValue extends ClickHouseObjectValue<LocalDate> {
     public ClickHouseDateValue update(String value) {
         if (value == null) {
             resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
         } else {
             set(LocalDate.parse(value, ClickHouseValues.DATE_FORMATTER));
         }

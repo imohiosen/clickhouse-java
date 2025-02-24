@@ -17,6 +17,9 @@ import com.clickhouse.data.ClickHouseUtils;
 import com.clickhouse.logging.Logger;
 import com.clickhouse.logging.LoggerFactory;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -24,22 +27,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-
+@Deprecated
 public class HttpUrlConnectionImpl extends ClickHouseHttpConnection {
     private static final Logger log = LoggerFactory.getLogger(HttpUrlConnectionImpl.class);
 
@@ -103,9 +107,18 @@ public class HttpUrlConnectionImpl extends ClickHouseHttpConnection {
 
     private HttpURLConnection newConnection(String url, boolean post) throws IOException {
         ClickHouseConfig c = config;
-        HttpURLConnection newConn = c.isUseNoProxy()
-                ? (HttpURLConnection) new URL(url).openConnection(Proxy.NO_PROXY)
-                : (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection newConn;
+        Proxy proxy = getProxy(c);
+        if (proxy != null) {
+            log.debug("using proxy type [%s] address [%s]", proxy.type().name(), proxy.address().toString());
+            newConn = (HttpURLConnection) new URL(url).openConnection(proxy);
+            String authString = getProxyAuth(c);
+            if (authString != null) {
+                newConn.setRequestProperty("Proxy-Authorization", authString);
+            }
+        } else {
+            newConn = (HttpURLConnection) new URL(url).openConnection();
+        }
 
         if ((newConn instanceof HttpsURLConnection) && c.isSsl()) {
             HttpsURLConnection secureConn = (HttpsURLConnection) newConn;
@@ -140,17 +153,28 @@ public class HttpUrlConnectionImpl extends ClickHouseHttpConnection {
         return value != null ? value : defaultValue;
     }
 
+    private static final Set<String> maskedHeaders = new HashSet<>(Arrays.asList("authorization",
+            "proxy-authorization","x-clickhouse-key"));
+
     private void setHeaders(HttpURLConnection conn, Map<String, String> headers) {
         headers = mergeHeaders(headers);
 
         if (headers != null && !headers.isEmpty()) {
             for (Entry<String, String> header : headers.entrySet()) {
+                if (log.isDebugEnabled()) {
+                    String value = header.getValue();
+                    if (value != null && maskedHeaders.contains(header.getKey().toLowerCase())) {
+                        value = "******";
+                    }
+                    log.debug("Adding header key [%s] value [%s]", header.getKey(), value);
+                }
                 conn.setRequestProperty(header.getKey(), header.getValue());
             }
         }
     }
 
     private void checkResponse(HttpURLConnection conn) throws IOException {
+        log.debug("http response code [%d]", conn.getResponseCode());
         if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) {
             String errorCode = conn.getHeaderField("X-ClickHouse-Exception-Code");
             // String encoding = conn.getHeaderField("Content-Encoding");
@@ -185,9 +209,9 @@ public class HttpUrlConnectionImpl extends ClickHouseHttpConnection {
         }
     }
 
-    protected HttpUrlConnectionImpl(ClickHouseNode server, ClickHouseRequest<?> request, ExecutorService executor)
-            throws IOException {
-        super(server, request);
+    protected HttpUrlConnectionImpl(ClickHouseNode server, ClickHouseRequest<?> request, ExecutorService executor,
+                                    Map<String, Serializable> additionalParams) throws IOException {
+        super(server, request, additionalParams);
 
         conn = newConnection(url, true);
     }

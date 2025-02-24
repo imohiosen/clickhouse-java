@@ -28,6 +28,7 @@ import com.clickhouse.data.value.UnsignedShort;
 /**
  * Wrapper of {@code short[]}.
  */
+@Deprecated
 public class ClickHouseShortArrayValue extends ClickHouseObjectValue<short[]> implements ClickHouseArraySequence {
     static final class UnsignedShortArrayValue extends ClickHouseShortArrayValue {
         @Override
@@ -583,7 +584,7 @@ public class ClickHouseShortArrayValue extends ClickHouseObjectValue<short[]> im
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new short[length]);
         }
         return this;

@@ -11,6 +11,7 @@ import com.clickhouse.data.ClickHouseOutputStream;
 /**
  * Empty input stream produces nothing and it can never be closed.
  */
+@Deprecated
 public final class EmptyInputStream extends ClickHouseInputStream {
     public static final EmptyInputStream INSTANCE = new EmptyInputStream();
 
@@ -46,6 +47,11 @@ public final class EmptyInputStream extends ClickHouseInputStream {
     @Override
     public byte readByte() throws IOException {
         throw new EOFException();
+    }
+
+    @Override
+    public ClickHouseByteBuffer readBufferUntil(byte[] separator) throws IOException {
+        return byteBuffer.reset();
     }
 
     @Override

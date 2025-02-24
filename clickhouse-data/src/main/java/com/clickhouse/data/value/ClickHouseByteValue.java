@@ -9,6 +9,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code byte}.
  */
+@Deprecated
 public class ClickHouseByteValue implements ClickHouseValue {
     /**
      * Unsigned version of {@code ClickHouseByteValue}.
@@ -85,7 +86,14 @@ public class ClickHouseByteValue implements ClickHouseValue {
 
         @Override
         public ClickHouseByteValue update(String value) {
-            return value == null ? resetToNullOrEmpty() : set(false, (byte) UnsignedByte.valueOf(value).byteValue());
+            if (value == null) {
+                resetToNullOrEmpty();
+            } else if (value.isEmpty()) {
+                resetToDefault();
+            } else {
+                set(false, UnsignedByte.valueOf(value).byteValue());
+            }
+            return this;
         }
     }
 
@@ -375,7 +383,14 @@ public class ClickHouseByteValue implements ClickHouseValue {
 
     @Override
     public ClickHouseByteValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, Byte.parseByte(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else {
+            set(false, Byte.parseByte(value));
+        }
+        return this;
     }
 
     @Override

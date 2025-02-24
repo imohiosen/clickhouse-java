@@ -4,17 +4,30 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.UUID;
 
 import com.clickhouse.client.config.ClickHouseClientOption;
+import com.clickhouse.client.http.ClickHouseHttpConnectionFactory;
 import com.clickhouse.data.ClickHouseColumn;
 
+import com.clickhouse.logging.Logger;
+import com.clickhouse.logging.LoggerFactory;
 import org.testng.Assert;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 public class ClickHouseDatabaseMetaDataTest extends JdbcIntegrationTest {
+    @BeforeMethod(groups = "integration")
+    public void setV1() {
+        System.setProperty("clickhouse.jdbc.v1","true");
+    }
+
+    private static final Logger log = LoggerFactory.getLogger(ClickHouseDatabaseMetaDataTest.class);
     @DataProvider(name = "selectedColumns")
     private Object[][] getSelectedColumns() {
         return new Object[][] {
@@ -180,6 +193,94 @@ public class ClickHouseDatabaseMetaDataTest extends JdbcIntegrationTest {
                 Assert.assertTrue(rs.next());
                 Assert.assertEquals(rs.getString("remarks"), tableComment);
                 Assert.assertFalse(rs.next());
+            }
+        }
+    }
+
+    @Test(groups = "integration")
+    public void testGetTables() throws SQLException {
+        if (isCloud()) return; //TODO: testGetTables - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
+        String db1 = "a" + UUID.randomUUID().toString().replace('-', 'X');
+        String db2 = "b" + UUID.randomUUID().toString().replace('-', 'X');
+        String tableName = "test_get_tables";
+        Properties props = new Properties();
+        props.setProperty("databaseTerm", "catalog");
+        try (ClickHouseConnection conn = newConnection(new Properties());
+                Statement s = conn.createStatement()) {
+            // no record
+            try (ResultSet rs = s.executeQuery("select * from numbers(1) where number=-1")) {
+                Assert.assertTrue(rs.isBeforeFirst(), "Should be before the first");
+                Assert.assertFalse(rs.isFirst(), "Should NOT be the first");
+                Assert.assertTrue(rs.isAfterLast(), "Should be after the last");
+                Assert.assertFalse(rs.isLast(), "Should NOT be the last");
+
+                Assert.assertFalse(rs.next(), "Should NOT have any row");
+                Assert.assertTrue(rs.isBeforeFirst(), "Should be before the first");
+                Assert.assertFalse(rs.isFirst(), "Should NOT be the first");
+                Assert.assertTrue(rs.isAfterLast(), "Should be after the last");
+                Assert.assertFalse(rs.isLast(), "Should NOT be the last");
+
+                Assert.assertFalse(rs.next(), "Should NOT have any row");
+            }
+
+            try (ResultSet rs = conn.getMetaData().getTables(null, null, UUID.randomUUID().toString(), null)) {
+                Assert.assertTrue(rs.isBeforeFirst(), "Should be before the first");
+                Assert.assertFalse(rs.isFirst(), "Should NOT be the first");
+                Assert.assertTrue(rs.isAfterLast(), "Should be after the last");
+                Assert.assertFalse(rs.isLast(), "Should NOT be the last");
+
+                Assert.assertFalse(rs.next(), "Should NOT have any row");
+                Assert.assertTrue(rs.isBeforeFirst(), "Should be before the first");
+                Assert.assertFalse(rs.isFirst(), "Should NOT be the first");
+                Assert.assertTrue(rs.isAfterLast(), "Should be after the last");
+                Assert.assertFalse(rs.isLast(), "Should NOT be the last");
+
+                Assert.assertFalse(rs.next(), "Should NOT have any row");
+            }
+
+            s.execute(String.format(Locale.ROOT, "create database %2$s; create database %3$s; "
+                    + "create table %2$s.%1$s(id Int32, value String)engine=Memory; "
+                    + "create view %3$s.%1$s as select * from %2$s.%1$s", tableName, db1, db2));
+            try (ResultSet rs = conn.getMetaData().getTables(null, null, tableName,
+                    new String[] { "MEMORY TABLE", "VIEW" })) {
+                Assert.assertTrue(rs.isBeforeFirst(), "Should be before the first");
+                Assert.assertTrue(rs.next());
+                Assert.assertTrue(rs.isFirst(), "Should be the first row");
+                Assert.assertEquals(rs.getString("TABLE_CAT"), db1);
+                Assert.assertEquals(rs.getString("TABLE_NAME"), tableName);
+                Assert.assertTrue(rs.next());
+                Assert.assertEquals(rs.getString("TABLE_CAT"), db2);
+                Assert.assertEquals(rs.getString("TABLE_NAME"), tableName);
+                Assert.assertTrue(rs.isLast(), "Should be the last row");
+                Assert.assertFalse(rs.next());
+                Assert.assertTrue(rs.isAfterLast(), "Should be after the last row");
+            } finally {
+                s.execute(String.format(Locale.ROOT, "drop database %1$s; drop database %2$s", db1, db2));
+            }
+
+            try (ResultSet rs1 = s.executeQuery("select * from system.tables");
+                    ResultSet rs2 = conn.getMetaData().getTables(null, null, null, null)) {
+                int count1 = 0 , count1withOutSystem = 0;
+                while (rs1.next()) {
+                    log.debug("%s.%s", rs1.getString(1) , rs1.getString(2));
+                    String databaseName = rs1.getString(1);
+                    count1++;
+                    if (!databaseName.equals("system"))
+                        count1withOutSystem++;
+                }
+                log.debug("--------- SEP ---------");
+                int count2 = 0, count2withOutSystem = 0;
+                while (rs2.next()) {
+                    log.debug("%s.%s", rs2.getString("TABLE_CAT") , rs2.getString("TABLE_NAME"));
+                    String databaseName = rs2.getString("TABLE_CAT");
+                    count2++;
+                    if (!databaseName.equals("system"))
+                        count2withOutSystem++;
+                }
+
+                Assert.assertEquals(rs1.getRow(), count1);
+                Assert.assertEquals(rs2.getRow(), count2);
+                Assert.assertEquals(count1withOutSystem, count2withOutSystem);
             }
         }
     }

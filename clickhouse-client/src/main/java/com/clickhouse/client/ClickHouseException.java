@@ -1,21 +1,25 @@
 package com.clickhouse.client;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.util.Locale;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Exception thrown from ClickHouse server. See full list at
  * https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/ErrorCodes.cpp.
  */
+@Deprecated
 public class ClickHouseException extends Exception {
     /**
      * Generated ID.
      */
     private static final long serialVersionUID = -2417038200885554382L;
 
+    public static final int ERROR_UNKNOWN_SETTING = 115;
     public static final int ERROR_ABORTED = 236;
     public static final int ERROR_CANCELLED = 394;
     public static final int ERROR_NETWORK = 210;
@@ -24,17 +28,21 @@ public class ClickHouseException extends Exception {
     public static final int ERROR_POCO = 1000;
     public static final int ERROR_TIMEOUT = 159;
     public static final int ERROR_UNKNOWN = 1002;
+    public static final int ERROR_SUSPICIOUS_TYPE_FOR_LOW_CARDINALITY = 455;
 
     static final String MSG_CODE = "Code: ";
     static final String MSG_CONNECT_TIMED_OUT = "connect timed out";
+    static final Pattern ERROR_CODE_PATTERN = Pattern.compile("Code:[ ]*(\\d+)");
 
     private final int errorCode;
 
-    private static String buildErrorMessage(int code, Throwable cause, ClickHouseNode server) {
-        return buildErrorMessage(code, cause != null ? cause.getMessage() : null, server);
+    private final ClickHouseNode server;
+
+    private static String buildErrorMessageImpl(int code, Throwable cause) {
+        return buildErrorMessageImpl(code, cause != null ? cause.getMessage() : null);
     }
 
-    private static String buildErrorMessage(int code, String message, ClickHouseNode server) {
+    private static String buildErrorMessageImpl(int code, String message) {
         StringBuilder builder = new StringBuilder();
 
         if (message != null && !message.isEmpty()) {
@@ -49,37 +57,16 @@ public class ClickHouseException extends Exception {
             builder.append("Unknown error ").append(code);
         }
 
-        if (server != null) {
-            builder.append(", server ").append(server);
-        }
-
         return builder.toString();
     }
 
     private static int extractErrorCode(String errorMessage) {
         if (errorMessage == null || errorMessage.isEmpty()) {
             return ERROR_UNKNOWN;
-        } else if (errorMessage.startsWith("Poco::Exception. Code: 1000, ")) {
-            return ERROR_POCO;
         }
-
-        int startIndex = errorMessage.indexOf(' ');
-        if (startIndex >= 0) {
-            for (int i = ++startIndex, len = errorMessage.length(); i < len; i++) {
-                char ch = errorMessage.charAt(i);
-                if (ch == '.' || ch == ',' || Character.isWhitespace(ch)) {
-                    try {
-                        return Integer.parseInt(errorMessage.substring(startIndex, i));
-                    } catch (NumberFormatException e) {
-                        // ignore
-                    }
-                    break;
-                }
-            }
-        }
-
-        // this is confusing as usually it's a client-side exception
-        return ERROR_UNKNOWN;
+        Matcher matcher = ERROR_CODE_PATTERN.matcher(errorMessage);
+        // when not match, this is confusing as usually it's a client-side exception
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : ERROR_UNKNOWN;
     }
 
     static Throwable getRootCause(Throwable t) {
@@ -132,10 +119,7 @@ public class ClickHouseException extends Exception {
     public static boolean isConnectTimedOut(Throwable t) {
         if (t instanceof SocketTimeoutException || t instanceof TimeoutException) {
             String msg = t.getMessage();
-            if (msg != null && msg.length() >= MSG_CONNECT_TIMED_OUT.length()) {
-                msg = msg.substring(0, MSG_CONNECT_TIMED_OUT.length()).toLowerCase(Locale.ROOT);
-            }
-            return MSG_CONNECT_TIMED_OUT.equals(msg);
+            return msg != null && msg.toLowerCase().contains(MSG_CONNECT_TIMED_OUT);
         }
 
         return false;
@@ -190,9 +174,9 @@ public class ClickHouseException extends Exception {
      * @param server server
      */
     public ClickHouseException(int code, Throwable cause, ClickHouseNode server) {
-        super(buildErrorMessage(code, cause, server), cause);
-
-        errorCode = code;
+        super(buildErrorMessageImpl(code, cause), cause);
+        this.server = server;
+        this.errorCode = code;
     }
 
     /**
@@ -203,9 +187,10 @@ public class ClickHouseException extends Exception {
      * @param server  server
      */
     public ClickHouseException(int code, String message, ClickHouseNode server) {
-        super(buildErrorMessage(code, message, server), null);
+        super(buildErrorMessageImpl(code, message), null);
 
-        errorCode = code;
+        this.server = server;
+        this.errorCode = code;
     }
 
     /**
@@ -218,7 +203,8 @@ public class ClickHouseException extends Exception {
     protected ClickHouseException(int code, String message, Throwable cause) {
         super(message, cause);
 
-        errorCode = code;
+        this.server = null;
+        this.errorCode = code;
     }
 
     /**
@@ -228,5 +214,14 @@ public class ClickHouseException extends Exception {
      */
     public int getErrorCode() {
         return errorCode;
+    }
+
+    /**
+     * Get the server that caused the exception.
+     * If the exception is not caused by a server, this method will return null.
+     * @return server
+     */
+    public ClickHouseNode getServer() {
+        return server;
     }
 }

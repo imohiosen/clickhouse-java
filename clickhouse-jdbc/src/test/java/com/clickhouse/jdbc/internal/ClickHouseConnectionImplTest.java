@@ -11,11 +11,13 @@ import com.clickhouse.jdbc.JdbcIntegrationTest;
 import com.clickhouse.jdbc.parser.ClickHouseSqlStatement;
 
 import org.testng.Assert;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 public class ClickHouseConnectionImplTest extends JdbcIntegrationTest {
     @Test(groups = "integration")
     public void testManualCommit() throws SQLException {
+        if (isCloud()) return; //TODO: testManualCommit - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         try (ClickHouseConnectionImpl conn = (ClickHouseConnectionImpl) newConnection()) {
             Assert.assertEquals(conn.getAutoCommit(), true);
             Assert.assertNull(conn.getTransaction(), "Should NOT have any transaction");
@@ -108,6 +110,7 @@ public class ClickHouseConnectionImplTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testManualRollback() throws SQLException {
+        if (isCloud()) return; //TODO: testManualRollback - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         try (ClickHouseConnectionImpl conn = (ClickHouseConnectionImpl) newConnection()) {
             Assert.assertEquals(conn.getAutoCommit(), true);
             Assert.assertNull(conn.getTransaction(), "Should NOT have any transaction");
@@ -206,8 +209,8 @@ public class ClickHouseConnectionImplTest extends JdbcIntegrationTest {
         try (ClickHouseConnection conn = newConnection(props)) {
             ClickHouseSqlStatement[] stmts = conn.parse(sql, conn.getConfig(), null);
             Assert.assertEquals(stmts.length, 1);
-            Assert.assertEquals(stmts[0].getSQL(),
-                    "ALTER TABLE `table` DELETE where column=1 SETTINGS mutations_sync=1");
+            Assert.assertEquals(stmts[0].getSQL(), conn.getServerVersion().check("[23.3,)") ? sql
+                    : "ALTER TABLE `table` DELETE where column=1 SETTINGS mutations_sync=1");
             if (conn.getServerVersion().check("[22.8,)")) {
                 supportsLightWeightDelete = true;
             }
@@ -221,8 +224,8 @@ public class ClickHouseConnectionImplTest extends JdbcIntegrationTest {
         try (ClickHouseConnection conn = newConnection(props)) {
             ClickHouseSqlStatement[] stmts = conn.parse(sql, conn.getConfig(), null);
             Assert.assertEquals(stmts.length, 1);
-            Assert.assertEquals(stmts[0].getSQL(),
-                    "ALTER TABLE `table` DELETE where column=1 SETTINGS mutations_sync=1");
+            Assert.assertEquals(stmts[0].getSQL(), conn.getServerVersion().check("[23.3,)") ? sql
+                    : "ALTER TABLE `table` DELETE where column=1 SETTINGS mutations_sync=1");
 
             stmts = conn.parse(sql, conn.getConfig(), conn.unwrap(ClickHouseRequest.class).getSettings());
             Assert.assertEquals(stmts.length, 1);
@@ -232,6 +235,7 @@ public class ClickHouseConnectionImplTest extends JdbcIntegrationTest {
 
     @Test(groups = "integration")
     public void testSwitchAutoCommit() throws SQLException {
+        if (isCloud()) return; //TODO: testSwitchAutoCommit - Revisit, see: https://github.com/ClickHouse/clickhouse-java/issues/1747
         try (ClickHouseConnection conn = newConnection()) {
             Assert.assertEquals(conn.getAutoCommit(), true);
             conn.setAutoCommit(false);

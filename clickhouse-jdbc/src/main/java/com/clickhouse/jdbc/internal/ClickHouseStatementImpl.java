@@ -1,33 +1,15 @@
 package com.clickhouse.jdbc.internal;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.Serializable;
-import java.nio.file.Path;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLFeatureNotSupportedException;
-import java.sql.SQLWarning;
-import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
 import com.clickhouse.client.ClickHouseClient;
 import com.clickhouse.client.ClickHouseConfig;
 import com.clickhouse.client.ClickHouseException;
 import com.clickhouse.client.ClickHouseNode;
 import com.clickhouse.client.ClickHouseRequest;
+import com.clickhouse.client.ClickHouseRequest.Mutation;
 import com.clickhouse.client.ClickHouseResponse;
 import com.clickhouse.client.ClickHouseResponseSummary;
 import com.clickhouse.client.ClickHouseSimpleResponse;
 import com.clickhouse.client.ClickHouseTransaction;
-import com.clickhouse.client.ClickHouseRequest.Mutation;
 import com.clickhouse.client.config.ClickHouseClientOption;
 import com.clickhouse.client.config.ClickHouseDefaults;
 import com.clickhouse.config.ClickHouseConfigChangeListener;
@@ -45,17 +27,40 @@ import com.clickhouse.data.ClickHouseInputStream;
 import com.clickhouse.data.ClickHouseOutputStream;
 import com.clickhouse.data.ClickHouseUtils;
 import com.clickhouse.data.ClickHouseValues;
-import com.clickhouse.logging.Logger;
-import com.clickhouse.logging.LoggerFactory;
 import com.clickhouse.jdbc.ClickHouseConnection;
 import com.clickhouse.jdbc.ClickHouseResultSet;
 import com.clickhouse.jdbc.ClickHouseStatement;
 import com.clickhouse.jdbc.JdbcTypeMapping;
-import com.clickhouse.jdbc.SqlExceptionUtils;
 import com.clickhouse.jdbc.JdbcWrapper;
+import com.clickhouse.jdbc.SqlExceptionUtils;
 import com.clickhouse.jdbc.parser.ClickHouseSqlStatement;
 import com.clickhouse.jdbc.parser.StatementType;
+import com.clickhouse.logging.Logger;
+import com.clickhouse.logging.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.Serializable;
+import java.nio.file.Path;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.SQLWarning;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
+
+@Deprecated
 public class ClickHouseStatementImpl extends JdbcWrapper
         implements ClickHouseConfigChangeListener<ClickHouseRequest<?>>, ClickHouseStatement {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseStatementImpl.class);
@@ -77,6 +82,7 @@ public class ClickHouseStatementImpl extends JdbcWrapper
     private int fetchSize;
     private int maxFieldSize;
     private long maxRows;
+    private OutputStream mirroredOutput;
     private int nullAsDefault;
     private boolean poolable;
     private volatile String queryId;
@@ -90,6 +96,21 @@ public class ClickHouseStatementImpl extends JdbcWrapper
     protected final JdbcTypeMapping mapper;
 
     protected ClickHouseSqlStatement[] parsedStmts;
+
+
+    private HashSet<String> getRequestRoles(ClickHouseSqlStatement stmt) {
+        HashSet<String> roles = new HashSet<>();
+
+        Map<String, String> settings = stmt.getSettings();
+        int i = 0;
+        String role;
+        while ((role = settings.get("_ROLE_" + i)) != null) {
+            roles.add(role);
+            i++;
+        }
+
+        return roles;
+    }
 
     private ClickHouseResponse getLastResponse(Map<ClickHouseOption, Serializable> options,
             List<ClickHouseExternalTable> tables, Map<String, String> settings) throws SQLException {
@@ -111,14 +132,19 @@ public class ClickHouseStatementImpl extends JdbcWrapper
             if (stmt.hasFormat()) {
                 request.format(ClickHouseFormat.valueOf(stmt.getFormat()));
             }
-            request.query(stmt.getSQL(), queryId = connection.newQueryId());
+
+            final HashSet<String> requestRoles = getRequestRoles(stmt);
+            if (!requestRoles.isEmpty()) {
+                request.set("_set_roles_stmt", requestRoles);
+            }
+
             // TODO skip useless queries to reduce network calls and server load
             try {
-                response = autoTx ? request.executeWithinTransaction(connection.isImplicitTransactionSupported())
-                        : request.transaction(connection.getTransaction()).executeAndWait();
+                response = sendRequest(stmt.getSQL(), r -> r);
             } catch (Exception e) {
                 throw SqlExceptionUtils.handle(e);
             } finally {
+                request.removeSetting("_set_roles_stmt");
                 if (response == null) {
                     // something went wrong
                 } else if (i + 1 < len) {
@@ -198,8 +224,10 @@ public class ClickHouseStatementImpl extends JdbcWrapper
 
                 f = getFile(f, stmt);
                 final ClickHouseResponseSummary summary = new ClickHouseResponseSummary(null, null);
+                TimeZone responseTimeZone = null;
                 try (ClickHouseResponse response = request.query(stmt.getSQL()).output(f).executeAndWait()) {
                     summary.add(response.getSummary());
+                    responseTimeZone = response.getTimeZone();
                 } catch (ClickHouseException e) {
                     throw SqlExceptionUtils.handle(e);
                 }
@@ -212,7 +240,8 @@ public class ClickHouseStatementImpl extends JdbcWrapper
                         new Object[][] { { file, f.getFormat().name(),
                                 f.hasCompression() ? f.getCompressionAlgorithm().encoding() : "none",
                                 f.getCompressionLevel(), f.getFile().length() } },
-                        summary);
+                        summary,
+                        responseTimeZone);
             } else if (stmt.getStatementType() == StatementType.INSERT) {
                 final Mutation m = request.write().query(stmt.getSQL());
                 final ClickHouseResponseSummary summary = new ClickHouseResponseSummary(null, null);
@@ -243,7 +272,7 @@ public class ClickHouseStatementImpl extends JdbcWrapper
                 } catch (IOException e) {
                     throw SqlExceptionUtils.handle(e);
                 }
-                return ClickHouseSimpleResponse.of(null, null, new Object[0][], summary);
+                return ClickHouseSimpleResponse.of(null, null, new Object[0][], summary, null);
             }
         }
 
@@ -252,7 +281,6 @@ public class ClickHouseStatementImpl extends JdbcWrapper
 
     protected ClickHouseResponse executeStatement(String stmt, Map<ClickHouseOption, Serializable> options,
             List<ClickHouseExternalTable> tables, Map<String, String> settings) throws SQLException {
-        boolean autoTx = connection.getAutoCommit() && connection.isTransactionSupported();
         try {
             if (options != null) {
                 request.options(options);
@@ -290,9 +318,8 @@ public class ClickHouseStatementImpl extends JdbcWrapper
                 }
                 request.external(list);
             }
-            request.query(stmt, queryId = connection.newQueryId());
-            return autoTx ? request.executeWithinTransaction(connection.isImplicitTransactionSupported())
-                    : request.transaction(connection.getTransaction()).executeAndWait();
+
+            return sendRequest(stmt, r -> r);
         } catch (Exception e) {
             throw SqlExceptionUtils.handle(e);
         }
@@ -308,18 +335,61 @@ public class ClickHouseStatementImpl extends JdbcWrapper
         return executeStatement(stmt.getSQL(), options, tables, settings);
     }
 
-    protected int executeInsert(String sql, InputStream input) throws SQLException {
+    private ClickHouseResponse sendRequest(String sql, Function<ClickHouseRequest<?>, ClickHouseRequest<?>> preSeal) throws SQLException {
         boolean autoTx = connection.getAutoCommit() && connection.isTransactionSupported();
-        Mutation req = request.write().query(sql, queryId = connection.newQueryId()).data(input);
-        try (ClickHouseResponse resp = autoTx
-                ? req.executeWithinTransaction(connection.isImplicitTransactionSupported())
-                : req.transaction(connection.getTransaction()).executeAndWait();
-                ResultSet rs = updateResult(new ClickHouseSqlStatement(sql, StatementType.INSERT), resp)) {
-            // ignore
+
+        ClickHouseRequest<?> req;
+        ClickHouseTransaction tx = null;
+        synchronized (request) {
+            try {
+                if (autoTx) {
+                    if (connection.isImplicitTransactionSupported()) {
+                        request.set(ClickHouseTransaction.SETTING_IMPLICIT_TRANSACTION, 1).transaction(null);
+                    } else {
+                        tx = request.getManager().createImplicitTransaction(request);
+                        request.transaction(connection.getTransaction());
+                    }
+                } else {
+                    try {
+                        request.transaction(connection.getTransaction());
+                    } catch (ClickHouseException e) {
+                        throw SqlExceptionUtils.handle(e);
+                    }
+                }
+
+                req = preSeal.apply(request).query(sql, queryId = connection.newQueryId()).seal();
+            } catch (Exception e) {
+                throw SqlExceptionUtils.handle(e);
+            }
+        }
+
+        try {
+            return req.executeAndWait();
+        } catch (Exception e) {
+            if (tx != null) {
+                try {
+                    tx.rollback();
+                } catch (Exception ex) {
+                    log.warn("Failed to rollback transaction", ex);
+                }
+            }
+            throw SqlExceptionUtils.handle(e);
+        } finally {
+            try {
+                request.transaction(null);
+            } catch (Exception e) {
+                throw SqlExceptionUtils.handle(ClickHouseException.of(e, req.getServer()));
+            }
+        }
+    }
+
+    protected int executeInsert(String sql, InputStream input) throws SQLException {
+        try (ClickHouseResponse response = sendRequest(sql, r -> r.write().data(input));
+             ResultSet rs = updateResult(new ClickHouseSqlStatement(sql, StatementType.INSERT), response)) {
+            // no more actions needed
         } catch (Exception e) {
             throw SqlExceptionUtils.handle(e);
         }
-
         return (int) currentUpdateCount;
     }
 
@@ -354,13 +424,11 @@ public class ClickHouseStatementImpl extends JdbcWrapper
     }
 
     protected ClickHouseSqlStatement getLastStatement() {
-        ClickHouseSqlStatement stmt = null;
-
-        if (parsedStmts != null && parsedStmts.length > 0) {
-            stmt = parsedStmts[parsedStmts.length - 1];
+        if (parsedStmts == null || parsedStmts.length == 0) {
+            throw new IllegalArgumentException("At least one parsed statement is required");
         }
 
-        return ClickHouseChecker.nonNull(stmt, "ParsedStatement"); // NOSONAR
+        return parsedStmts[parsedStmts.length - 1];
     }
 
     protected void setLastStatement(ClickHouseSqlStatement stmt) {
@@ -385,7 +453,7 @@ public class ClickHouseStatementImpl extends JdbcWrapper
     }
 
     protected ResultSet updateResult(ClickHouseSqlStatement stmt, ClickHouseResponse response) throws SQLException {
-        if (stmt.isQuery() || !response.getColumns().isEmpty()) {
+        if (stmt.isQuery() || (!stmt.isRecognized() && !response.getColumns().isEmpty())) {
             currentUpdateCount = -1L;
             currentResult = new ClickHouseResultSet(stmt.getDatabaseOrDefault(getConnection().getCurrentDatabase()),
                     stmt.getTable(), this, response);
@@ -543,11 +611,9 @@ public class ClickHouseStatementImpl extends JdbcWrapper
 
         if (this.maxRows != max) {
             if (max == 0L || !connection.allowCustomSetting()) {
-                request.removeSetting(ClickHouseClientOption.MAX_RESULT_ROWS.getKey());
-                request.removeSetting("result_overflow_mode");
+                request.set(ClickHouseClientOption.MAX_RESULT_ROWS.getKey(), 0);
             } else {
                 request.set(ClickHouseClientOption.MAX_RESULT_ROWS.getKey(), max);
-                request.set("result_overflow_mode", "break");
             }
             this.maxRows = max;
         }
@@ -900,6 +966,23 @@ public class ClickHouseStatementImpl extends JdbcWrapper
     @Override
     public ClickHouseConfig getConfig() {
         return request.getConfig();
+    }
+
+    @Override
+    public OutputStream getMirroredOutput() {
+        return mirroredOutput;
+    }
+
+    @Override
+    public void setMirroredOutput(OutputStream out) {
+        if (this.mirroredOutput != null) {
+            try {
+                this.mirroredOutput.flush();
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+        this.mirroredOutput = out;
     }
 
     @Override

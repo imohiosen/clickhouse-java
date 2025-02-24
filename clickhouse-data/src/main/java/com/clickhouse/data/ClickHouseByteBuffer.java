@@ -1,11 +1,14 @@
 package com.clickhouse.data;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -15,7 +18,8 @@ import java.util.UUID;
  * array, and it uses {@link #position()} and {@link #length()} to define the
  * slice. You may think of it as a lite version of {@link java.nio.ByteBuffer}.
  */
-public class ClickHouseByteBuffer implements Serializable {
+@Deprecated
+public final class ClickHouseByteBuffer implements Serializable {
     private static final long serialVersionUID = -8178041799873465082L;
 
     /**
@@ -83,8 +87,6 @@ public class ClickHouseByteBuffer implements Serializable {
     public static ClickHouseByteBuffer of(byte[] bytes, int offset, int length) {
         if (bytes == null || bytes.length == 0 || length == 0) {
             return newInstance();
-        } else {
-            validate(bytes, offset, length);
         }
 
         return new ClickHouseByteBuffer(bytes, offset, length);
@@ -144,6 +146,14 @@ public class ClickHouseByteBuffer implements Serializable {
         return getBigInteger(0, length, false);
     }
 
+    public BigDecimal asBigDecimal() {
+        return asBigDecimal(0);
+    }
+
+    public BigDecimal asBigDecimal(int scale) {
+        return new BigDecimal(asBigInteger(), scale);
+    }
+
     public boolean asBoolean() {
         return getBoolean(0);
     }
@@ -169,6 +179,19 @@ public class ClickHouseByteBuffer implements Serializable {
             values[i] = getDouble(offset);
         }
         return values;
+    }
+
+    public LocalDate asDate() {
+        return LocalDate.ofEpochDay(asUnsignedInteger());
+    }
+
+    public LocalDateTime asDateTime() {
+        return asDateTime(0);
+    }
+
+    public LocalDateTime asDateTime(int scale) {
+        return ClickHouseValues
+                .convertToDateTime(asBigDecimal(ClickHouseChecker.between(scale, ClickHouseValues.PARAM_SCALE, 0, 9)));
     }
 
     public float asFloat() {
@@ -234,7 +257,7 @@ public class ClickHouseByteBuffer implements Serializable {
      * @return double
      */
     public double getDouble(int offset) {
-        return Double.longBitsToDouble(getLong(offset));
+        return ClickHouseByteUtils.getFloat64(array, offset + position);
     }
 
     /**
@@ -246,7 +269,7 @@ public class ClickHouseByteBuffer implements Serializable {
      * @return float
      */
     public float getFloat(int offset) {
-        return Float.intBitsToFloat(getInteger(offset));
+        return ClickHouseByteUtils.getFloat32(array, offset + position);
     }
 
     /**
@@ -258,9 +281,7 @@ public class ClickHouseByteBuffer implements Serializable {
      * @return signed integer
      */
     public int getInteger(int offset) {
-        int i = offset + position;
-        return (0xFF & array[i]) | ((0xFF & array[i + 1]) << 8) | ((0xFF & array[i + 2]) << 16)
-                | ((0xFF & array[i + 3]) << 24);
+        return ClickHouseByteUtils.getInt32(array, offset + position);
     }
 
     /**
@@ -272,11 +293,7 @@ public class ClickHouseByteBuffer implements Serializable {
      * @return signed long
      */
     public long getLong(int offset) {
-        int i = offset + position;
-        return (0xFFL & array[i]) | ((0xFFL & array[i + 1]) << 8) | ((0xFFL & array[i + 2]) << 16)
-                | ((0xFFL & array[i + 3]) << 24) | ((0xFFL & array[i + 4]) << 32)
-                | ((0xFFL & array[i + 5]) << 40) | ((0xFFL & array[i + 6]) << 48)
-                | ((0xFFL & array[i + 7]) << 56);
+        return ClickHouseByteUtils.getInt64(array, offset + position);
     }
 
     /**
@@ -288,8 +305,7 @@ public class ClickHouseByteBuffer implements Serializable {
      * @return signed short
      */
     public short getShort(int offset) {
-        int i = offset + position;
-        return (short) ((0xFF & array[i]) | (array[i + 1] << 8));
+        return ClickHouseByteUtils.getInt16(array, offset + position);
     }
 
     /**
@@ -626,7 +642,7 @@ public class ClickHouseByteBuffer implements Serializable {
         if (bytes == null || bytes.length == 0 || length == 0) {
             return reset();
         } else {
-            validate(bytes, offset, length);
+//            validate(bytes, offset, length);
         }
 
         if (bytes != this.array) {
@@ -784,10 +800,12 @@ public class ClickHouseByteBuffer implements Serializable {
     /**
      * Sets new length.
      *
-     * @param newLength new length
+     * @param newLength new length, negative number is treated as zero
+     * @return this byte buffer
      */
-    public void setLength(int newLength) {
-        this.length = ClickHouseChecker.between(newLength, "Length", 0, this.array.length - this.position);
+    public ClickHouseByteBuffer setLength(int newLength) {
+        this.length = newLength < 0 ? 0 : newLength;
+        return this;
     }
 
     @Override

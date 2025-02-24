@@ -14,7 +14,9 @@ import com.clickhouse.data.ClickHouseChecker;
 import com.clickhouse.data.ClickHouseFormat;
 import com.clickhouse.data.ClickHouseInputStream;
 import com.clickhouse.data.ClickHouseUtils;
+import com.clickhouse.logging.Logger;
 
+@Deprecated
 public class ClickHouseHttpResponse {
     private static long getLongValue(Map<String, String> map, String key) {
         String value = map.get(key);
@@ -69,7 +71,8 @@ public class ClickHouseHttpResponse {
         this.summary = new ClickHouseResponseSummary(
                 new ClickHouseResponseSummary.Progress(getLongValue(map, "read_rows"), getLongValue(map, "read_bytes"),
                         getLongValue(map, "total_rows_to_read"), getLongValue(map, "written_rows"),
-                        getLongValue(map, "written_bytes")),
+                        getLongValue(map, "written_bytes"), getLongValue(map, "elapsed_ns"),
+                        getLongValue(map, "result_rows"), this.queryId),
                 null);
 
         this.format = format != null ? format : connection.config.getFormat();
@@ -78,5 +81,9 @@ public class ClickHouseHttpResponse {
 
     public ClickHouseInputStream getInputStream() {
         return input;
+    }
+
+    public TimeZone getTimeZone() {
+        return timeZone;
     }
 }

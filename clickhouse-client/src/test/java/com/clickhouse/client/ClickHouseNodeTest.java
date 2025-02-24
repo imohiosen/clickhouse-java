@@ -1,6 +1,8 @@
 package com.clickhouse.client;
 
+import com.clickhouse.config.ClickHouseOption;
 import org.testng.Assert;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.net.URI;
@@ -393,19 +395,40 @@ public class ClickHouseNodeTest extends BaseIntegrationTest {
     @Test(groups = { "integration" })
     public void testProbe() {
         // FIXME does not support ClickHouseProtocol.POSTGRESQL for now
-        ClickHouseProtocol[] protocols = new ClickHouseProtocol[] { ClickHouseProtocol.GRPC,
-                ClickHouseProtocol.HTTP, ClickHouseProtocol.MYSQL, ClickHouseProtocol.TCP };
+        ClickHouseProtocol[] protocols = null;
+        if ( isCloud() ) {
+            protocols = new ClickHouseProtocol[]{
+                    ClickHouseProtocol.HTTP
+            };
+        } else {
+            protocols = new ClickHouseProtocol[]{ClickHouseProtocol.GRPC,
+                    ClickHouseProtocol.HTTP, ClickHouseProtocol.MYSQL, ClickHouseProtocol.TCP};
+        }
         ClickHouseVersion serverVersion = ClickHouseVersion
                 .of(System.getProperty("clickhouseVersion", "latest"));
         for (ClickHouseProtocol p : protocols) {
             if (p == ClickHouseProtocol.GRPC && !serverVersion.check("[21.1,)")) {
                 continue;
             }
-            ClickHouseNode node = getServer(ClickHouseProtocol.ANY, p.getDefaultPort());
+            int port = p.getDefaultPort();
+            if (isCloud()) {
+                port = 8443;
+            }
+            ClickHouseNode node = getServer(ClickHouseProtocol.ANY, port);
             ClickHouseNode probedNode = node.probe();
             Assert.assertNotEquals(probedNode, node);
             Assert.assertEquals(probedNode.getProtocol(), p);
         }
+    }
+
+    @Test(groups = { "unit" })
+    public void testToString() {
+        Assert.assertTrue(ClickHouseNode.of("a?b=1").toString()
+                .startsWith("ClickHouseNode [uri=any://a:0/default, options={b=1}]@"));
+        Assert.assertTrue(ClickHouseNode.of("a?b=1&sslkey=secret").toString()
+                .startsWith("ClickHouseNode [uri=any://a:0/default, options={b=1,sslkey=*}]@"));
+        Assert.assertTrue(ClickHouseNode.of("a?password=*&b=1&sslkey=secret").toString()
+                .startsWith("ClickHouseNode [uri=any://a:0/default, options={b=1,sslkey=*}]@"));
     }
 
     @Test(groups = { "unit" })
@@ -416,5 +439,35 @@ public class ClickHouseNodeTest extends BaseIntegrationTest {
                 ClickHouseNode.of("http://test:test@server1.dc1/db1?user=default&!async&auto_discovery#apj,r1s1")
                         .toUri().toString(),
                 "http://server1.dc1:8123/db1?async=false&auto_discovery=true#apj,r1s1");
+    }
+
+    @Test(groups = { "unit" }, dataProvider = "testPropertyWithValueList_endpoints")
+    public void testPropertyWithValueList(String endpoints, int numOfNodes, String[] expectedBaseUris) {
+        ClickHouseNodes node = ClickHouseNodes.of(endpoints);
+        Assert.assertEquals(node.nodes.size(), numOfNodes, "Number of nodes does not match");
+
+        int i = 0;
+        for (ClickHouseNode n : node.nodes) {
+            Assert.assertEquals(n.config.getDatabase(), "my_db");
+            Assert.assertEquals(expectedBaseUris[i++], n.getBaseUri());
+            String customSettings = (String)n.config.getOption(ClickHouseClientOption.CUSTOM_SETTINGS);
+            String configSettings = (String) n.config.getOption(ClickHouseClientOption.CUSTOM_SETTINGS);
+
+            Arrays.asList(customSettings, configSettings).forEach((settings) -> {
+                Map<String, String> settingsMap = ClickHouseOption.toKeyValuePairs(settings);
+                Assert.assertEquals(settingsMap.get("param1"), "value1");
+                Assert.assertEquals(settingsMap.get("param2"), "value2");
+            });
+        }
+    }
+
+    @DataProvider(name = "testPropertyWithValueList_endpoints")
+    public static Object[][] endpoints() {
+        return new Object[][] {
+            { "http://server1:9090/my_db?custom_settings=param1=value1,param2=value2", 1, new String[]{"http://server1:9090/"} },
+            { "http://server1/my_db?custom_settings=param1=value1,param2=value2", 1, new String[]{"http://server1:8123/"} },
+            { "http://server1:9090,server2/my_db?custom_settings=param1=value1,param2=value2", 2, new String[]{"http://server1:9090/", "http://server2:8123/"} },
+            { "http://server1,server2:9090/my_db?custom_settings=param1=value1,param2=value2", 2, new String[]{"http://server1:8123/", "http://server2:9090/"} }
+        };
     }
 }

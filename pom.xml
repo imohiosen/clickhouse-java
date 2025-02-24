@@ -39,20 +39,17 @@
     <modules>
         <!-- shared -->
         <module>clickhouse-data</module>
-        <!-- module>clickhouse-parser</module -->
-        <!-- client -->
+        <!-- client v1 -->
         <module>clickhouse-client</module>
-        <module>clickhouse-cli-client</module>
-        <module>clickhouse-grpc-client</module>
         <module>clickhouse-http-client</module>
+        <!-- client v2 -->
+        <module>client-v2</module>
         <!-- driver -->
         <module>clickhouse-jdbc</module>
+        <module>jdbc-v2</module>
         <module>clickhouse-r2dbc</module>
-        <!-- server -->
-        <!-- module>clickhouse-bridge-server</module -->
-        <!-- module>clickhouse-graphql-server</module -->
-        <!-- misc -->
-        <module>clickhouse-benchmark</module>
+
+<!-- Not working. Disabled       <module>clickhouse-benchmark</module>-->
     </modules>
 
     <scm>
@@ -84,82 +81,89 @@
     </distributionManagement>
 
     <properties>
-        <revision>0.5.0-SNAPSHOT</revision>
-        <project.current.year>2023</project.current.year>
+        <revision>0.8.1-SNAPSHOT</revision>
+        <project.current.year>2025</project.current.year>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <annotations-api.version>6.0.53</annotations-api.version>
         <apache.httpclient.version>5.2.1</apache.httpclient.version>
-        <arrow.version>11.0.0</arrow.version>
-        <avro.version>1.11.1</avro.version>
+        <arrow.version>12.0.1</arrow.version>
+        <asm.version>9.5</asm.version>
+        <avro.version>1.11.4</avro.version>
         <brotli.version>0.1.2</brotli.version>
-        <brotli4j.version>1.11.0</brotli4j.version>
-        <byte-buddy.version>1.14.0</byte-buddy.version>
-        <caffeine.version>3.1.4</caffeine.version>
-        <compress.version>1.22</compress.version>
-        <dnsjava.version>3.5.2</dnsjava.version>
-        <fastutil.version>8.5.11</fastutil.version>
-        <graphql.version>20.0</graphql.version>
-        <grpc.version>1.53.0</grpc.version>
+        <brotli4j.version>1.12.0</brotli4j.version>
+        <caffeine.version>3.1.7</caffeine.version>
+        <compress.version>1.27.1</compress.version>
+        <dnsjava.version>3.6.0</dnsjava.version>
+        <fastutil.version>8.5.12</fastutil.version>
         <gson.version>2.10.1</gson.version>
         <jctools.version>4.0.1</jctools.version>
         <opencensus.version>0.31.1</opencensus.version>
-        <protobuf.version>3.22.0</protobuf.version>
+        <protobuf.version>3.23.4</protobuf.version>
         <lz4.version>1.8.0</lz4.version>
-        <msgpack.version>0.9.3</msgpack.version>
-        <roaring-bitmap.version>0.9.39</roaring-bitmap.version>
-        <slf4j.version>2.0.6</slf4j.version>
-        <snappy.version>1.1.9.1</snappy.version>
+        <msgpack.version>0.9.5</msgpack.version>
+        <roaring-bitmap.version>0.9.47</roaring-bitmap.version>
+        <slf4j.version>2.0.7</slf4j.version>
+        <snappy.version>1.1.10.4</snappy.version>
         <xz.version>1.9</xz.version>
-        <zstd-jni.version>1.5.4-2</zstd-jni.version>
-        <testcontainers.version>1.17.6</testcontainers.version>
+        <zstd-jni.version>1.5.5-5</zstd-jni.version>
+        <testcontainers.version>1.19.7</testcontainers.version>
         <!-- stay 7.5 for JDK 8 support -->
-        <testng.version>7.5</testng.version>
+        <testng.version>7.5.1</testng.version>
 
-        <mariadb-driver.version>3.1.2</mariadb-driver.version>
-        <mysql-driver.version>8.0.32</mysql-driver.version>
-        <postgresql-driver.version>42.5.4</postgresql-driver.version>
+        <mariadb-driver.version>3.1.4</mariadb-driver.version>
+        <mysql-driver.version>8.1.0</mysql-driver.version>
+        <postgresql-driver.version>42.6.1</postgresql-driver.version>
 
-        <repackaged.version>1.8.0</repackaged.version>
+        <repackaged.version>1.9.2</repackaged.version>
         <shade.base>${project.groupId}.client.internal</shade.base>
 
         <antrun-plugin.version>3.1.0</antrun-plugin.version>
-        <assembly-plugin.version>3.5.0</assembly-plugin.version>
-        <clean-plugin.version>3.2.0</clean-plugin.version>
-        <compiler-plugin.version>3.11.0</compiler-plugin.version>
-        <deploy-plugin.version>3.1.0</deploy-plugin.version>
-        <enforcer-plugin.version>3.2.1</enforcer-plugin.version>
+        <assembly-plugin.version>3.6.0</assembly-plugin.version>
+        <clean-plugin.version>3.3.1</clean-plugin.version>
+        <compiler-plugin.version>3.13.0</compiler-plugin.version>
+        <deploy-plugin.version>3.1.1</deploy-plugin.version>
+        <enforcer-plugin.version>3.3.0</enforcer-plugin.version>
         <exec-plugin.version>3.1.0</exec-plugin.version>
-        <failsafe-plugin.version>3.0.0-M9</failsafe-plugin.version>
+        <failsafe-plugin.version>3.1.2</failsafe-plugin.version>
         <flatten-plugin.version>1.2.7</flatten-plugin.version>
-        <git-plugin.version>4.9.9</git-plugin.version>
-        <gpg-plugin.version>3.0.1</gpg-plugin.version>
-        <helper-plugin.version>3.3.0</helper-plugin.version>
-        <jacoco-plugin.version>0.8.8</jacoco-plugin.version>
+        <git-plugin.version>6.0.0</git-plugin.version>
+        <gpg-plugin.version>3.1.0</gpg-plugin.version>
+        <helper-plugin.version>3.4.0</helper-plugin.version>
+        <jacoco-plugin.version>0.8.12</jacoco-plugin.version>
         <jar-plugin.version>3.3.0</jar-plugin.version>
         <javadoc-plugin.version>3.5.0</javadoc-plugin.version>
-        <native-plugin.version>0.9.20</native-plugin.version>
+        <native-plugin.version>0.9.23</native-plugin.version>
         <os-plugin.version>1.7.1</os-plugin.version>
         <protobuf-plugin.version>0.6.1</protobuf-plugin.version>
-        <shade-plugin.version>3.4.1</shade-plugin.version>
+        <shade-plugin.version>3.5.0</shade-plugin.version>
         <source-plugin.version>3.2.1</source-plugin.version>
         <staging-plugin.version>1.6.13</staging-plugin.version>
-        <surefire-plugin.version>3.0.0-M9</surefire-plugin.version>
+        <surefire-plugin.version>3.2.5</surefire-plugin.version>
         <toolchains-plugin.version>3.1.0</toolchains-plugin.version>
-        <versions-plugin.version>2.15.0</versions-plugin.version>
+        <versions-plugin.version>2.16.0</versions-plugin.version>
+        <resource-plugin.version>3.3.1</resource-plugin.version>
+        <jmh.version>1.37</jmh.version>
 
         <minJdk>1.8</minJdk>
         <skipTests>false</skipTests>
         <skipITs>${skipTests}</skipITs>
         <skipUTs>${skipTests}</skipUTs>
 
-        <sonar.projectKey>zhicwu_clickhouse-jdbc</sonar.projectKey>
+        <sonar.projectKey>ClickHouse_clickhouse-jdbc</sonar.projectKey>
         <sonar.moduleKey>${project.artifactId}</sonar.moduleKey>
-        <sonar.organization>zhicwu</sonar.organization>
+        <sonar.organization>clickhouse-java</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-        <sonar.projectVersion>0.5.0</sonar.projectVersion>
+        <sonar.projectVersion>${project.version}</sonar.projectVersion>
         <sonar.cpd.exclusions>**/*0*.java,**/data/*Value.java,**/data/array/*Value.java,**/stream/*Stream.java</sonar.cpd.exclusions>
+        <sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+        <sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
+        <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco-aggregate/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+        <sonar.language>java</sonar.language>
+
+        <build_timestamp>${maven.build.timestamp}</build_timestamp>
+        <maven.build.timestamp.format>MM-dd-yyyy HH:mm</maven.build.timestamp.format>
     </properties>
 
     <dependencyManagement>
@@ -167,11 +171,6 @@
             <dependency>
                 <groupId>${project.groupId}</groupId>
                 <artifactId>com.javacc</artifactId>
-                <version>${repackaged.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>io.grpc</artifactId>
                 <version>${repackaged.version}</version>
             </dependency>
             <dependency>
@@ -226,51 +225,9 @@
                 <version>${zstd-jni.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.graphql-java</groupId>
-                <artifactId>graphql-java</artifactId>
-                <version>${graphql.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>dnsjava</groupId>
                 <artifactId>dnsjava</artifactId>
                 <version>${dnsjava.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-api</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-core</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-context</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-netty-shaded</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <!-- separate classifier did not work well with flatten plugin -->
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-okhttp</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <!-- grpc-protobuf-lite is not compatible with v3 -->
-                <artifactId>grpc-protobuf</artifactId>
-                <version>${grpc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-stub</artifactId>
-                <version>${grpc.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.opencensus</groupId>
@@ -280,11 +237,6 @@
             <dependency>
                 <groupId>io.opencensus</groupId>
                 <artifactId>opencensus-impl</artifactId>
-                <version>${opencensus.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.opencensus</groupId>
-                <artifactId>opencensus-contrib-grpc-metrics</artifactId>
                 <version>${opencensus.version}</version>
             </dependency>
             <dependency>
@@ -344,6 +296,11 @@
                 <version>${msgpack.version}</version>
             </dependency>
             <dependency>
+                <groupId>org.ow2.asm</groupId>
+                <artifactId>asm</artifactId>
+                <version>${asm.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.roaringbitmap</groupId>
                 <artifactId>RoaringBitmap</artifactId>
                 <version>${roaring-bitmap.version}</version>
@@ -374,21 +331,16 @@
                 <version>${testcontainers.version}</version>
             </dependency>
             <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>toxiproxy</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
                 <groupId>org.testng</groupId>
                 <artifactId>testng</artifactId>
                 <version>${testng.version}</version>
             </dependency>
-            <dependency>
-                <groupId>org.apache.httpcomponents.client5</groupId>
-                <artifactId>httpclient5</artifactId>
-                <version>${apache.httpclient.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.httpcomponents.core5</groupId>
-                <artifactId>httpcore5</artifactId>
-                <version>${apache.httpclient.version}</version>
-            </dependency>
-
             <dependency>
                 <groupId>org.mariadb.jdbc</groupId>
                 <artifactId>mariadb-java-client</artifactId>
@@ -421,6 +373,18 @@
                         <artifactId>*</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-core</artifactId>
+                <version>${jmh.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-generator-annprocess</artifactId>
+                <version>${jmh.version}</version>
+                <scope>test</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -509,6 +473,7 @@
                         <skipITs>${skipITs}</skipITs>
                         <useSystemClassLoader>true</useSystemClassLoader>
                         <useModulePath>false</useModulePath>
+                        <redirectTestOutputToFile>true</redirectTestOutputToFile>
                     </configuration>
                     <executions>
                         <execution>
@@ -530,6 +495,7 @@
                         <groups>unit</groups>
                         <skipTests>${skipUTs}</skipTests>
                         <useModulePath>false</useModulePath>
+                        <redirectTestOutputToFile>true</redirectTestOutputToFile>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -580,24 +546,6 @@
                     <version>${staging-plugin.version}</version>
                 </plugin>
                 <plugin>
-                    <groupId>org.xolstice.maven.plugins</groupId>
-                    <artifactId>protobuf-maven-plugin</artifactId>
-                    <version>${protobuf-plugin.version}</version>
-                    <configuration>
-                        <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                        <pluginId>grpc-java</pluginId>
-                        <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
-                    </configuration>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>compile</goal>
-                                <goal>compile-custom</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </plugin>
-                <plugin>
                     <groupId>io.github.git-commit-id</groupId>
                     <artifactId>git-commit-id-maven-plugin</artifactId>
                     <version>${git-plugin.version}</version>
@@ -620,6 +568,11 @@
                         <offline>true</offline>
                     </configuration>
                 </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>${resource-plugin.version}</version>
+                </plugin>
             </plugins>
         </pluginManagement>
         <plugins>
@@ -636,23 +589,6 @@
                     </compilerArgs>
                 </configuration>
                 <executions>
-                    <execution>
-                        <id>java9</id>
-                        <phase>none</phase>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <release>9</release>
-                            <jdkToolchain>
-                                <version>9</version>
-                            </jdkToolchain>
-                            <compileSourceRoots>
-                                <compileSourceRoot>${project.basedir}/src/main/java9</compileSourceRoot>
-                            </compileSourceRoots>
-                            <multiReleaseOutput>true</multiReleaseOutput>
-                        </configuration>
-                    </execution>
                     <execution>
                         <id>java11</id>
                         <phase>none</phase>
@@ -717,6 +653,11 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
             </plugin>
         </plugins>
     </build>
@@ -863,29 +804,6 @@
             </properties>
         </profile>
         <profile>
-            <id>compile-java9</id>
-            <activation>
-                <jdk>[9,)</jdk>
-                <property>
-                    <name>!j8</name>
-                </property>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-compiler-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>java9</id>
-                                <phase>compile</phase>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-        <profile>
             <id>compile-java11</id>
             <activation>
                 <jdk>[11,)</jdk>
@@ -948,9 +866,6 @@
                         <configuration>
                             <toolchains>
                                 <jdk>
-                                    <version>9</version>
-                                </jdk>
-                                <jdk>
                                     <version>11</version>
                                 </jdk>
                                 <jdk>
@@ -963,10 +878,6 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-compiler-plugin</artifactId>
                         <executions>
-                            <execution>
-                                <id>java9</id>
-                                <phase>compile</phase>
-                            </execution>
                             <execution>
                                 <id>java11</id>
                                 <phase>compile</phase>
@@ -1142,11 +1053,38 @@
                             <argLine>${failsafeArgLine}</argLine>
                         </configuration>
                     </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>default-jar</id>
+                                <configuration>
+                                    <archive>
+                                        <addMavenDescriptor>false</addMavenDescriptor>
+                                        <manifest>
+                                            <addDefaultEntries>true</addDefaultEntries>
+                                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                                            <addBuildEnvironmentEntries>true</addBuildEnvironmentEntries>
+                                        </manifest>
+                                        <manifestEntries>
+                                            <Multi-Release>true</Multi-Release>
+                                            <Implementation-URL>${project.url}</Implementation-URL>
+                                            <Implementation-Vendor>ClickHouse, Inc.</Implementation-Vendor>
+                                            <Implementation-Vendor-Id>${project.groupId}</Implementation-Vendor-Id>
+                                            <Implementation-Version><![CDATA[${project.artifactId} ${project.version} (revision: ${git.commit.id.abbrev})]]></Implementation-Version>
+                                            <SCM-Revision>${git.commit.id.full}</SCM-Revision>
+                                        </manifestEntries>
+                                    </archive>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                 </plugins>
             </build>
         </profile>
         <profile>
-            <id>build9</id>
+            <id>build11</id>
             <activation>
                 <property>
                     <name>!j8</name>
@@ -1167,9 +1105,6 @@
                         <configuration>
                             <toolchains>
                                 <jdk>
-                                    <version>9</version>
-                                </jdk>
-                                <jdk>
                                     <version>11</version>
                                 </jdk>
                                 <jdk>
@@ -1182,10 +1117,6 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-compiler-plugin</artifactId>
                         <executions>
-                            <execution>
-                                <id>java9</id>
-                                <phase>compile</phase>
-                            </execution>
                             <execution>
                                 <id>java11</id>
                                 <phase>compile</phase>

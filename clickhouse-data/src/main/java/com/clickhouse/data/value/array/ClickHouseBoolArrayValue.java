@@ -27,6 +27,7 @@ import com.clickhouse.data.value.ClickHouseObjectValue;
 /**
  * Wrapper of {@code boolean[]}.
  */
+@Deprecated
 public class ClickHouseBoolArrayValue extends ClickHouseObjectValue<boolean[]> implements ClickHouseArraySequence {
     private static final String TYPE_NAME = "boolean[]";
 
@@ -519,7 +520,7 @@ public class ClickHouseBoolArrayValue extends ClickHouseObjectValue<boolean[]> i
     public ClickHouseArraySequence allocate(int length, Class<?> clazz, int level) {
         if (length < 1) {
             resetToDefault();
-        } else if (length() != length) {
+        } else {
             set(new boolean[length]);
         }
         return this;

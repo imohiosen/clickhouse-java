@@ -8,6 +8,7 @@ import com.clickhouse.data.ClickHouseValues;
 /**
  * Wrapper class of {@code long}.
  */
+@Deprecated
 public class ClickHouseLongValue implements ClickHouseValue {
     /**
      * Unsigned version of {@code ClickHouseLongValue}.
@@ -99,7 +100,14 @@ public class ClickHouseLongValue implements ClickHouseValue {
 
         @Override
         public ClickHouseLongValue update(String value) {
-            return value == null ? resetToNullOrEmpty() : set(false, Long.parseUnsignedLong(value));
+            if (value == null) {
+                resetToNullOrEmpty();
+            } else if (value.isEmpty()) {
+                resetToDefault();
+            } else {
+                set(false, Long.parseUnsignedLong(value));
+            }
+            return this;
         }
     }
 
@@ -394,7 +402,14 @@ public class ClickHouseLongValue implements ClickHouseValue {
 
     @Override
     public ClickHouseLongValue update(String value) {
-        return value == null ? resetToNullOrEmpty() : set(false, Long.parseLong(value));
+        if (value == null) {
+            resetToNullOrEmpty();
+        } else if (value.isEmpty()) {
+            resetToDefault();
+        } else {
+            set(false, Long.parseLong(value));
+        }
+        return this;
     }
 
     @Override
